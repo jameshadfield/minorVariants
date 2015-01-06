@@ -21,10 +21,10 @@ if (length(commandArgs(trailingOnly=TRUE))) {
   interactive  <-  FALSE
 } else { ## interactive // testing
   workDir      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/resistance"
-  fname        <-  "5seqs.alleles.tab"
-  geneAnalysis <-  FALSE
+  fname        <-  "5seqs.genes.tab"
+  geneAnalysis <-  TRUE
   tabName      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/resistance/alleles.tab"
-  geneName     <-  "rpoB"
+  geneName     <-  "rplD"
   interactive  <-  TRUE
   ylimUpper    <-  0.2
 }

@@ -353,15 +353,54 @@ class Allele(Variation):
 		else: ## aa
 			self.pileup, self.codonpileup = self.calculate_pileup_counts_AA(bamobj,self.chrpos)
 
+	def interpret_variation(self):
+		### the type (aa/dna) chooses which interpret fun to call. These functions have overlapping code which can be brought inside this one day.
+		if self.ttype=='dna':
+			self.interpret_base_variation()
+		elif self.ttype=='aa':
+			self.interpret_codon_variation()
+
 	def interpret_base_variation(self):
-		print "NOT YET WRITTEN!"
-		pass
+		mindepth = 10 ## hardcoded -- todo
+
+		## mismapping would result in a poor depth here... check for this
+		if max(self.pileup.values()) < mindepth:
+			print '[warning] possible mapping failure at base {}. Depth of highest allele: {}'.format(self.allelepos,max(self.pileup.values()))
+
+		# self.pileup is a dict of bases->counts
+		totaldepth = sum(self.pileup.values())
+		newpileup = { key:value for key,value in self.pileup.items() if value >= mindepth}
+		newtotaldepth = sum(newpileup.values())
+		# prelim to cluster into three groups for R
+		self.R3 = {'WT':0,'other':0,'published':0,'depth':newtotaldepth}
+
+		for base,depth in newpileup.items():
+			depthfrac = float(depth) / newtotaldepth
+			if base in self.dnaWTplus:
+				self.R3['WT'] += depthfrac
+				continue
+			## if on reverse strand then must RC pileup result
+			if self.rev:
+				baseGeneStrand = sanger.RC[base]
+			else:
+				baseGeneStrand = base
+
+			mutation="{}{}{}".format("/".join(self.dnaWTgene),self.allelepos,baseGeneStrand)
+			if base in self.dnaALTplus:
+				nstr = " ** PUBLISHED MUTATION ** "
+				self.R3['published'] += depthfrac
+			else:
+				nstr=''
+				self.R3['other'] += depthfrac
+			print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
+
+
 
 	def interpret_codon_variation(self):
 		codoncov = sum(self.codonpileup.values())
 		# pprint (self.codonpileup)
 		# print "removing those codons sequnced < 10x"
-		mindepth = 10
+		mindepth = 10 ## hardcoded -- todo
 		newpileup = { key:value for key,value in self.codonpileup.items() if value >= mindepth}
 		# pprint(newpileup)
 		newtotaldepth = sum(newpileup.values())
@@ -607,11 +646,8 @@ if __name__ == "__main__":
 			## the allele object gives up co-ordinates, nothing more. These are passed to a BCF object / BAM object which returns counts / alleles+counts. The allele object then interprets these counts. This is done by a method of Allele which calls a method of the (passed) BCF / BAM object
 			allele.add_pileup_counts(bam)
 
-			if allele.ttype=='dna':
-				allele.interpret_base_variation()
-			else: ##codon
-				allele.interpret_codon_variation()
-				allele.write_R3_data(Rfh_alleles,fname)
+			allele.interpret_variation()
+			allele.write_R3_data(Rfh_alleles,fname)
 
 
 		for gene in genes:

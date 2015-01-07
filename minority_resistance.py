@@ -330,7 +330,14 @@ class Allele(Variation):
 		#refseq should be Bio.SeqIO.parse() dict
 		# refseq has zero-based co-ord system (like a bam file)
 		if self.ttype=='dna':
-			refseqbase = records[self.chrom].seq[self.chrpos[0]-1]
+			try:
+				refseqbase = records[self.chrom].seq[self.chrpos[0]-1]
+			except KeyError:
+				print "[error] {} not found in the reference fasta -- this script will probably die soon".format(self.chrom)
+				return
+			except IndexError:
+				print "[error] position {} not found in the reference fasta  -- this script will probably die soon".format(self.chrpos[0]-1)
+				return
 			if refseqbase in self.dnaWTplus:
 				print "[reference-check] {} matched reference".format(self.name)
 			else:

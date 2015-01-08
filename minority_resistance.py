@@ -634,10 +634,12 @@ if __name__ == "__main__":
 			gene.add_codon_info(records)
 
 	## OPEN OUTPUT FILE HANDLES
-	Rfh_genes = open(options.prefix+".genes.tab",'w')
-	Rfh_genes.write("sequence\tposition\tmutation\tfrac\n")
-	Rfh_alleles = open(options.prefix+".alleles.tab",'w')
-	Rfh_alleles.write("sequence\tposition\tmutation\tfrac\n")
+	if genes:
+		Rfh_genes = open(options.prefix+".genes.tab",'w')
+		Rfh_genes.write("sequence\tposition\tmutation\tfrac\n")
+	if alleles:
+		Rfh_alleles = open(options.prefix+".alleles.tab",'w')
+		Rfh_alleles.write("sequence\tposition\tmutation\tfrac\n")
 
 	## parse the BCF files one by one (logically this seems the most efficient)
 	seqcount=0
@@ -664,8 +666,10 @@ if __name__ == "__main__":
 			gene.interpret_codon_variation()
 			gene.write_R_data(Rfh_genes,fname)
 
-	Rfh_genes.close()
-	Rfh_alleles.close()
+	if genes:
+		Rfh_genes.close()
+	if alleles:
+		Rfh_alleles.close()
 
 
 	## call R to plot (1) each gene and (2) the alleles

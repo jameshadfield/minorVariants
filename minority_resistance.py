@@ -489,7 +489,7 @@ class Allele(Variation):
 # 			# return something
 
 class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
-	"""don't forget: bamfiles are zero-based"""
+	"""don't forget: bamfiles are zero-base"""
 	def __init__(self, bamfile):
 		self.samfile = pysam.Samfile(bamfile,"rb")
 
@@ -671,29 +671,19 @@ if __name__ == "__main__":
 	## call R to plot (1) each gene and (2) the alleles
 	rscriptfile = os.path.join(os.path.dirname(os.path.abspath(__file__)),"plot_minor_variants.R") ## same directory as this script (i hope)
 	#  plot minor variants expects the following arguments:
-	#  [2] workDir [3] fname  [4] geneAnalysis [5] tabName   [6] geneName   [7] saveName    [8] ylimUpper
+	#  RScript plot_minor_variants.R working_directory tabfileoutput tabfileinput gene output plot_params
+	#	0                1                  2               3            4         5      6      7
 	print "[progress-update] Calling R to produce plots via the following commands:"
 	for gene in genes:
+		plot_params = "1,1,0.3" ## gene analysis??  ,   num columns    ,   y axis max
 		saveName = options.prefix+".genes."+gene.genename+".pdf"
-		call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".genes.tab", "1", options.tabfile, gene.genename, saveName, "0.2"]
+		call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".genes.tab", options.tabfile, gene.genename, saveName, plot_params]
 		call_R(call_array,False)
 
 	## for the alleles (the most important)
-	call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".alleles.tab", "0", options.tabfile, "NA", options.prefix+".alleles.pdf", "0.2"]
+	plot_params = "0,4,0.3"
+	call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".alleles.tab", options.tabfile, "-", options.prefix+".alleles.pdf", plot_params]
 	call_R(call_array,False)
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

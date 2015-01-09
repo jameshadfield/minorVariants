@@ -226,9 +226,9 @@ class Gene(Variation):
 		for idx,codon in enumerate(self.codons):
 			baseposns = codon['baseposns']
 			if self.rev:
-				bases = [ sanger.RC[records[self.chrom].seq[x-1]] for x in baseposns ]
+				bases = [ sanger.RC[records[self.chrom].seq[x-1]].upper() for x in baseposns ]
 			else:
-				bases = [ records[self.chrom].seq[x-1] for x in baseposns ]
+				bases = [ records[self.chrom].seq[x-1].upper() for x in baseposns ]
 			refAA = sanger.codon2aa["".join(bases)]
 			self.codons[idx]['codon'] = refAA
 
@@ -252,8 +252,8 @@ class Gene(Variation):
 
 	def add_pileup_counts(self,bamobj):
 		""" at this stage, we only care about the amino acids, but this may change later on """
-		self.codonpileup = [None for x in self.codons]
-		for idx,codon in enumerate(self.codons):
+		self.codonpileup = [None for x in self.codons] ## list of amino acid positions
+		for idx,codon in enumerate(self.codons): # iterates over all amino acids (tuple of base positions in each)
 			# print "pileup codon {} -- {}    ".format(idx,codon['codon'])
 			_, self.codonpileup[idx] = self.calculate_pileup_counts_AA(bamobj,codon['baseposns'])
 
@@ -331,7 +331,7 @@ class Allele(Variation):
 		# refseq has zero-based co-ord system (like a bam file)
 		if self.ttype=='dna':
 			try:
-				refseqbase = records[self.chrom].seq[self.chrpos[0]-1]
+				refseqbase = records[self.chrom].seq[self.chrpos[0]-1].upper()
 			except KeyError:
 				print "[error] {} not found in the reference fasta -- this script will probably die soon".format(self.chrom)
 				return
@@ -344,7 +344,7 @@ class Allele(Variation):
 				print "[reference-check] {} specified {} in the tabfile (plus strand: {}) but has {} in the (plus strand) reference".format(self.name,self.dnaWTgene,self.dnaWTplus,refseqbase)
 
 		else: ## aa
-			refseqbases = [ records[self.chrom].seq[x-1] for x in self.chrpos ] ## order is on correct sense but bases may need to be RCd
+			refseqbases = [ records[self.chrom].seq[x-1].upper() for x in self.chrpos ] ## order is on correct sense but bases may need to be RCd
 			if self.rev:
 				refseqbases = [sanger.RC[x] for x in refseqbases]
 			refseqcodon = "".join(refseqbases)
@@ -685,7 +685,7 @@ if __name__ == "__main__":
 		call_R(call_array,False)
 
 	## for the alleles (the most important)
-	plot_params = "0,4,0.3"
+	plot_params = "0,8,1"
 	call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".alleles.tab", options.tabfile, "-", options.prefix+".alleles.pdf", plot_params]
 	call_R(call_array,False)
 

@@ -122,9 +122,9 @@ if (geneAnalysis) {  # restrict to chosen gene name
 ### but we need to tweak formatting (e.g. num cols -> multiplot) and if we should save it!
 if ( ! interactive ){
   height = 0.66 * length(unique(resistancedf[ , 1])) ## .66 inch per track
-  width = 0.33 * length(levels(resistancedf$position))
+  width = 20 #0.33 * length(levels(resistancedf$position)) * ncol
   # fit to A4 page
-  if (width > 8) {width = 8} 
+  if (width > 20) {width = 20} 
   if (height > 11) {height = 11}
   # minimum sizes:
   if (width < 6) {width = 6}

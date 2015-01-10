@@ -164,7 +164,7 @@ class Sanger(object):
 
 ### BASE CLASS WHICH ALLELE AND GENE INHERIT.
 class Variation(object):
-	"""Allele and Gene classes inherit this"""
+	"""Allele and Gene classes inherit this. An object should never be created from this class, only child classes"""
 	def __init__(self,genename,chrom,rev,genebase1,geneendbase,drug):
 		self.genename = genename
 		self.chrom = chrom
@@ -172,8 +172,85 @@ class Variation(object):
 		self.genecoords = (min(genebase1,geneendbase),max(genebase1,geneendbase))
 		self.drug = drug
 
+
+	def set_pileup_counts(self,bamobj):
+		"""this method generates a list of positions / tuples for pileup to act upon
+		these are then sent to bamobj.pileup, along with the filtering parameters
+		the results are stored in this object as self.pileup which is dict of DNA/CODON -> count
+		if amino acid(s) then another object self.aapileup is generated which is dict of AA->count
+		if this is a gene, the consensus seq could be pieced together via
+		[ max(x.iterkeys(), key=(lamda key: x[key])) for x in self.aapileup ]
+		"""
+
+		# generate list of positions to pileup :)
+		if self.ttype=='dna':
+			baseList = [self.chrpos[0]]
+		else:
+			print "ARGHHHH"
+			sys.exit()
+
+		minStrandDepth=5
+		minMapQual=0
+		minBaseQual=0
+
+		self.pileup = bamobj.pileup(self.chrom,baseList,self.rev,minStrandDepth,minMapQual,minBaseQual)
+		pprint(self.pileup)
+
+		if self.ttype=='aa':
+			pass
+
+
+	def interpret(self,rfh,fname):
+		"""for each item in the pileup (which will be either one base pos, one allele or many alleles)
+		we assign fractions
+		and classify them as: WT, OTHER, ALT, SWEEP (SWEEP is OTHER if frac(OTHER)>0.8)
+		these results are sent to Rwriter
+		they could also be sent to a setter if desired
+		"""
+
+		# choose which pileup structure we analyse
+		if self.ttype=='dna':
+			p=self.pileup
+		elif self.ttpye=='aa':
+			p=self.aapileup
+
+		for idx,item in enumerate(p): ## this goes through the bases or amino acid POSITIONS analysed
+			# check if we got any results here (that passed filtering remember...)
+			if not len(item):
+				print '[warning] possible mapping failure at base {}. Depth of highest allele: {}'.format('UNKN','UNKN')
+				continue
+
+			data = {'WT':0,'ALT':0,'OTHER':0}
+			cov = sum(item.values()) #remember, this has already been filtered and corresponds to the *gene* not the *ref*
+
+			for base_or_codon,depth in item.items():
+				depthfrac = float(depth) / cov
+				if base_or_codon in self.dnaWTgene:
+					data['WT'] += depthfrac
+				else: ## ohh, how exciting!
+					mutation="{}{}{}".format("/".join(self.dnaWTgene),self.allelepos,base_or_codon)
+					if base_or_codon in self.dnaALTgene:
+						data['ALT'] += depthfrac
+						nstr = " ** PUBLISHED MUTATION ** "
+					else:
+						data['OTHER'] += depthfrac
+						nstr=''
+					print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
+
+			### temporary ONLY
+			## write only if there's resistance of *some kind*
+			nameMap = {'WT':'WT','ALT':'published','OTHER':'other'}
+			if data['ALT'] + data['OTHER'] > 0:
+				print "writing to R"
+				posstr = "{}_{}".format(self.genename, self.allelepos)
+				for mutationType,value in data.items():
+					rfh.write("{}\t{}\t{}\t{:.4f}\n".format(fname,posstr,nameMap[mutationType],value))
+
+
+
 	def calculate_pileup_counts_DNA(self,bamobj,chrpos):
 		"""returns dict of bases->counts (DNA)"""
+		print " calculate_pileup_counts_DNA depreciated"
 		pileup = bamobj.pileup_base(chrpos,self.chrom)
 		if self.rev:
 			return { x:pileup[sanger.RC[x]] for x in sanger.dna }
@@ -182,7 +259,8 @@ class Variation(object):
 
 	def calculate_pileup_counts_AA(self,bamobj,chrpos):
 		""" returns codons->counts AND amino_acids->counts (AA)"""
-		pileup = bamobj.pileup_codon(min(chrpos),max(chrpos),self.chrom)
+		print " calculate_pileup_counts_AA depreciated"
+		pileup = bamobj.pileup_codon(min(chrpos),max(charpos),self.chrom)
 		if self.rev:
 			## codons must be reverse complemented
 			new = {}
@@ -239,6 +317,7 @@ class Gene(Variation):
 			if allelePos1based in self.resistanceAlleles:
 				if self.codons[idx]['codon'] not in self.resistanceAlleles[allelePos1based].aaWT:
 					print "we're up to {} but resistance allele WT is {}".format(self.codons[idx]['codon'], self.resistanceAlleles[allelePos1based].aaWT)
+
 
 	def associate_alleles(self,alleles):
 		self.resistanceAlleles = {}
@@ -489,14 +568,96 @@ class Allele(Variation):
 # 			# return something
 
 class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
-	"""don't forget: bamfiles are zero-base"""
+	"""don't forget: bamfiles are zero-base
+	this class should/could potentially be a closure function
+	"""
 	def __init__(self, bamfile):
 		self.samfile = pysam.Samfile(bamfile,"rb")
 
 	def bcfpos2bampos(self,bcfpos):
 		return int(bcfpos)-1
 
+	def pileup(self,chrom,baseList,rev,minStrandDepth,minMapQual,minBaseQual):
+		"""This is a method which interacts with samtools pileup across the bases provided in baseList
+		baseList is a list of positions, it could be one integer or a list of tuples each length three (a codon)
+		baseList is read as an array and returned as such, therefore if the gene is on the - strand
+		the order *must still be* [AA1,AA2,AA3,AA4...] where AA1 = (basepos1,basepos2,basepos3) even if basepos1>basepos2
+
+		returns: a list (same length of baseList) of dictionaries with bases/triplets at these positions
+		with associated counts (that passed filtering). If rev=True then these bases have been reverse complemented,
+		so they should always agree with the *gene* (but not necessarily the reference (+ strand) sequence)
+
+		Filtering is as follows (defaults are set in the calling method/fn)
+		bases must be > minMapQual and > minBaseQual
+		if triplet then bases must come from the same read
+		read depth / strand > minStrandDepth
+		"""
+		def pass_filter(x):
+			return True
+
+		ret = []
+		RC = {'A':'T','T':'A','C':'G','G':'C','N':'N'}
+		DNA = {'A','T','C','G'}
+		for item in baseList:
+			if isinstance(item,int): ## it's a int (=> a base), not a tuple
+				bases = {'C':0,'T':0,'A':0,'G':0}
+				basepos = self.bcfpos2bampos(item)
+				for pileupcolumn in self.samfile.pileup(chrom, basepos, basepos+1):
+					if pileupcolumn.pos==basepos:
+						coverage = pileupcolumn.n
+						for pileupread in pileupcolumn.pileups:
+							# print "read {} --> {}".format(pileupread.alignment.qname,pileupread.alignment.query[pileupread.qpos])
+							try:
+								sambase = pileupread.alignment.query[pileupread.qpos].upper()
+							except IndexError:
+								continue ## cuased by reads returned not spanning the basepos. Soft clipping?
+
+							if pass_filter(sambase) and sambase in DNA: # filtering
+								if rev:
+									bases[RC[sambase]] += 1
+								else:
+									bases[sambase] += 1
+
+				ret.append( {k: v for k, v in bases.iteritems() if v} ) ## filters out bases with no reads!
+
+			else: ## item is a tuple --> codon (three bases)
+				assert(len(item)==3)
+				if rev:
+					assert(item[0]-1==item[1] and item[1]-1==item[2])
+					bambasemin, bambasemax = self.bcfpos2basepos(item[2]), self.bcfpos2basepos(item[0]) ## samtools needs in increasing order
+				else:
+					assert(item[0]+1==item[1] and item[1]+1==item[2])
+					bambasemin, bambasemax = self.bcfpos2basepos(item[0]), self.bcfpos2basepos(item[2])
+
+				codons = {}
+				for pileupcolumn in self.samfile.pileup(chrom, bambasemin, bambasemax):
+					# pdb.set_trace()
+					if pileupcolumn.pos==bambasemin:
+						for pileupread in pileupcolumn.pileups:
+							try:
+								## error filtering here!!!!!
+								triplet = [pileupread.alignment.query[pileupread.qpos], pileupread.alignment.query[pileupread.qpos+1], pileupread.alignment.query[pileupread.qpos+2]]
+							except IndexError: # didn't span the codon
+								continue
+
+							if pass_filter(triplet):
+								if rev:
+									codon = [RC[x.upper()] for x in triplet[::-1]]
+								else:
+									codon = [x.upper() for x in triplet]
+
+								if sum(x in DNA for x in codon)==3: ## all bases in codon are A/T/C/G
+									ret.append("".join(codon))
+
+								try:
+									codons[codon]+=1
+								except KeyError:
+									codons[codon]=1
+				ret.append( codons ) ## push the result onto the return queue
+		return ret
+
 	def pileup_base(self,bcfbasepos,chrom):
+		print "** bam.pileup_base is depreciated"
 		basepos = self.bcfpos2bampos(bcfbasepos)
 		bases = {'C':0,'T':0,'A':0,'G':0}
 		for pileupcolumn in self.samfile.pileup(chrom, basepos, basepos+1):
@@ -514,6 +675,7 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		return bases
 
 	def pileup_codon(self,bcfbasemin,bcfbasemax,chrom):
+		print "** bam.pileup_codon is depreciated"
 		bambasemin = self.bcfpos2bampos(bcfbasemin)
 		bambasemax = self.bcfpos2bampos(bcfbasemax)
 
@@ -611,6 +773,9 @@ def call_R(call_array,log):
 	except CalledProcessError:
 		print "[error] plotting failed"
 
+
+
+
 if __name__ == "__main__":
 	sanger = Sanger() ## general dna / aa information. quite useful.
 	options = get_user_options()
@@ -653,18 +818,22 @@ if __name__ == "__main__":
 		for allele in alleles:
 			print "[progress-update] checking allele {} in gene {}".format(allele.name,allele.genename)
 			## the allele object gives up co-ordinates, nothing more. These are passed to a BCF object / BAM object which returns counts / alleles+counts. The allele object then interprets these counts. This is done by a method of Allele which calls a method of the (passed) BCF / BAM object
-			allele.add_pileup_counts(bam)
 
-			allele.interpret_variation()
-			allele.write_R3_data(Rfh_alleles,fname)
+			allele.set_pileup_counts(bam)
+			allele.interpret(Rfh_alleles,fname)
+
+	# 		allele.add_pileup_counts(bam) ## old
+
+	# 		allele.interpret_variation()
+	# 		allele.write_R3_data(Rfh_alleles,fname)
 
 
-		for gene in genes:
-			print "[progress-update] calculating AA variation in gene {} sequence {}".format(gene.genename,fname)
-			sys.stdout.flush()
-			gene.add_pileup_counts(bam)
-			gene.interpret_codon_variation()
-			gene.write_R_data(Rfh_genes,fname)
+	# 	for gene in genes:
+	# 		print "[progress-update] calculating AA variation in gene {} sequence {}".format(gene.genename,fname)
+	# 		sys.stdout.flush()
+	# 		gene.add_pileup_counts(bam)
+	# 		gene.interpret_codon_variation()
+	# 		gene.write_R_data(Rfh_genes,fname)
 
 	if genes:
 		Rfh_genes.close()
@@ -672,20 +841,20 @@ if __name__ == "__main__":
 		Rfh_alleles.close()
 
 
-	## call R to plot (1) each gene and (2) the alleles
+	# ## call R to plot (1) each gene and (2) the alleles
 	rscriptfile = os.path.join(os.path.dirname(os.path.abspath(__file__)),"plot_minor_variants.R") ## same directory as this script (i hope)
-	#  plot minor variants expects the following arguments:
-	#  RScript plot_minor_variants.R working_directory tabfileoutput tabfileinput gene output plot_params
-	#	0                1                  2               3            4         5      6      7
-	print "[progress-update] Calling R to produce plots via the following commands:"
-	for gene in genes:
-		plot_params = "1,1,0.3" ## gene analysis??  ,   num columns    ,   y axis max
-		saveName = options.prefix+".genes."+gene.genename+".pdf"
-		call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".genes.tab", options.tabfile, gene.genename, saveName, plot_params]
-		call_R(call_array,False)
+	# #  plot minor variants expects the following arguments:
+	# #  RScript plot_minor_variants.R working_directory tabfileoutput tabfileinput gene output plot_params
+	# #	0                1                  2               3            4         5      6      7
+	# print "[progress-update] Calling R to produce plots via the following commands:"
+	# for gene in genes:
+	# 	plot_params = "1,1,0.3" ## gene analysis??  ,   num columns    ,   y axis max
+	# 	saveName = options.prefix+".genes."+gene.genename+".pdf"
+	# 	call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".genes.tab", options.tabfile, gene.genename, saveName, plot_params]
+	# 	call_R(call_array,False)
 
 	## for the alleles (the most important)
-	plot_params = "0,8,1"
+	plot_params = "0,4,1"
 	call_array = ["Rscript", rscriptfile, os.getcwd(), options.prefix+".alleles.tab", options.tabfile, "-", options.prefix+".alleles.pdf", plot_params]
 	call_R(call_array,False)
 

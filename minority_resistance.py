@@ -200,7 +200,7 @@ class Variation(object):
 			pass
 
 
-	def interpret(self,rfh,fname):
+	def interpret(self,writeR):
 		"""for each item in the pileup (which will be either one base pos, one allele or many alleles)
 		we assign fractions
 		and classify them as: WT, OTHER, ALT, SWEEP (SWEEP is OTHER if frac(OTHER)>0.8)
@@ -237,14 +237,22 @@ class Variation(object):
 						nstr=''
 					print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
 
-			### temporary ONLY
-			## write only if there's resistance of *some kind*
+			## write to R tab file via a writer fn which uses **kwargs
 			nameMap = {'WT':'WT','ALT':'published','OTHER':'other'}
 			if data['ALT'] + data['OTHER'] > 0:
-				print "writing to R"
-				posstr = "{}_{}".format(self.genename, self.allelepos)
 				for mutationType,value in data.items():
-					rfh.write("{}\t{}\t{}\t{:.4f}\n".format(fname,posstr,nameMap[mutationType],value))
+					writeR(file=fname, name="{}_{}".format(self.genename, self.allelepos), mutation=nameMap[mutationType], frac=value)
+
+			## here's where we could store the values if desired (e.g. setter fn)
+
+			# ### temporary ONLY
+			# ## write only if there's resistance of *some kind*
+			# nameMap = {'WT':'WT','ALT':'published','OTHER':'other'}
+			# if data['ALT'] + data['OTHER'] > 0:
+			# 	print "writing to R"
+			# 	posstr = "{}_{}".format(self.genename, self.allelepos)
+			# 	for mutationType,value in data.items():
+			# 		rfh.write("{}\t{}\t{}\t{:.4f}\n".format(fname,posstr,nameMap[mutationType],value))
 
 
 
@@ -762,6 +770,7 @@ def parse_bcf_bam_files(cwd):
 	return files
 
 ## CALL RSCRIPT (given a call array)
+
 def call_R(call_array,log):
 	try:
 		print " ".join(map(str, call_array))
@@ -773,6 +782,17 @@ def call_R(call_array,log):
 	except CalledProcessError:
 		print "[error] plotting failed"
 
+def open_rwriter(fname):
+	"""a closure to open a filehandle and return a writer function"""
+	fh = open(fname,'w')
+	fh.write("sequence\tposition\tmutation\tfrac\n") ##header line
+	def rwriter(**kwargs):
+		## fh is in scope (closure)
+		if 'close' in kwargs:
+			fh.close()
+			return
+		fh.write("{}\t{}\t{}\t{:.4f}\n".format(kwargs['file'],kwargs['name'],kwargs['mutation'],kwargs['frac']))
+	return rwriter
 
 
 
@@ -799,12 +819,9 @@ if __name__ == "__main__":
 			gene.add_codon_info(records)
 
 	## OPEN OUTPUT FILE HANDLES
-	if genes:
-		Rfh_genes = open(options.prefix+".genes.tab",'w')
-		Rfh_genes.write("sequence\tposition\tmutation\tfrac\n")
-	if alleles:
-		Rfh_alleles = open(options.prefix+".alleles.tab",'w')
-		Rfh_alleles.write("sequence\tposition\tmutation\tfrac\n")
+	if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
+	if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
+
 
 	## parse the BCF files one by one (logically this seems the most efficient)
 	seqcount=0
@@ -820,7 +837,8 @@ if __name__ == "__main__":
 			## the allele object gives up co-ordinates, nothing more. These are passed to a BCF object / BAM object which returns counts / alleles+counts. The allele object then interprets these counts. This is done by a method of Allele which calls a method of the (passed) BCF / BAM object
 
 			allele.set_pileup_counts(bam)
-			allele.interpret(Rfh_alleles,fname)
+			allele.interpret(writeRalleles)
+			# allele.interpret(Rfh_alleles,fname)
 
 	# 		allele.add_pileup_counts(bam) ## old
 
@@ -835,11 +853,12 @@ if __name__ == "__main__":
 	# 		gene.interpret_codon_variation()
 	# 		gene.write_R_data(Rfh_genes,fname)
 
-	if genes:
-		Rfh_genes.close()
-	if alleles:
-		Rfh_alleles.close()
-
+	# if genes:
+	# 	Rfh_genes.close()
+	# if alleles:
+	# 	Rfh_alleles.close()
+	if genes:   writeRgenes(close=1)
+	if alleles: writeRalleles(close=1)
 
 	# ## call R to plot (1) each gene and (2) the alleles
 	rscriptfile = os.path.join(os.path.dirname(os.path.abspath(__file__)),"plot_minor_variants.R") ## same directory as this script (i hope)

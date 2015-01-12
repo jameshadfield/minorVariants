@@ -196,8 +196,8 @@ class Variation(object):
 		"""
 
 		minStrandDepth=5
-		minMapQual=0
-		minBaseQual=0
+		minMapQual=30
+		minBaseQual=30
 
 		self.pileup = bamobj.pileup(self.chrom,self.baseList,self.rev,minStrandDepth,minMapQual,minBaseQual)
 
@@ -231,13 +231,13 @@ class Variation(object):
 		for idx,item in enumerate(pileup): ## this goes through the bases or amino acid POSITIONS analysed (only one item for a AA / DNA mutation)
 			# check if we got any results here (that passed filtering remember...)
 			if not len(item):
-				print '[warning] possible mapping failure at base {}. Depth of highest allele: {}'.format('UNKN','UNKN')
+				print '[warning] possible mapping failure'
 				continue
 
 			# print "REF @ base {} has {}".format(idx+1,self.aaseq[idx])
 			# pprint(item)
 
-			data = {'WT':0,'ALT':0,'OTHER':0}
+			data = {'WT':0,'ALT':0,'OTHER':0,'SWEEP':0}
 			cov = sum(item.values()) #remember, this has already been filtered and corresponds to the *gene* not the *ref*
 
 			for base_or_codon,depth in item.items():
@@ -259,6 +259,9 @@ class Variation(object):
 					if base_or_codon in ALT:
 						data['ALT'] += depthfrac
 						nstr = " ** PUBLISHED MUTATION ** "
+					elif depthfrac > 0.8:
+						data['SWEEP'] += depthfrac
+						nstr = " ** SWEEP ** "
 					else:
 						data['OTHER'] += depthfrac
 						nstr=''
@@ -266,11 +269,11 @@ class Variation(object):
 						print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
 
 			## write to R tab file via a writer fn which uses **kwargs
-			nameMap = {'WT':'WT','ALT':'published','OTHER':'other'}
+			nameMap = {'WT':'WT','ALT':'published','OTHER':'other','SWEEP':'fixed'}
 			if self.ttype=='gene' or data['ALT'] + data['OTHER'] > 0:
 				for mutationType,value in data.items():
 					if value > 0:
-						writeR(file=fname, name="{}_{}".format(self.genename, posInGene), mutation=nameMap[mutationType], frac=value)
+						writeR(file=fname, name="{}_{:0>4d}".format(self.genename, posInGene), mutation=nameMap[mutationType], frac=value)
 
 			## here's where we could store the values if desired (e.g. setter fn)
 
@@ -363,7 +366,17 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		if triplet then bases must come from the same read
 		read depth / strand > minStrandDepth
 		"""
-		def pass_filter(x,y):
+		def pass_filter(pileupread,qposns):
+			### fail if optical/PCR duplicate
+			if pileupread.alignment.is_duplicate:
+				return False
+			### check mapping quality
+			if int(pileupread.alignment.mapq)<minMapQual:
+				return False
+			### check base call quality
+			for qpos in qposns:
+				if ord(pileupread.alignment.qual[qpos])<minBaseQual:
+					return False
 			return True
 
 		ret = []
@@ -371,7 +384,7 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		DNA = {'A','T','C','G'}
 		for item in baseList:
 			if len(item)==1: # tuple of length 1 => a base
-				bases = {'C':0,'T':0,'A':0,'G':0}
+				bases = {'C':[0,0],'T':[0,0],'A':[0,0],'G':[0,0]}
 				basepos = self.bcfpos2bampos(item[0])
 				for pileupcolumn in self.samfile.pileup(chrom, basepos, basepos+1):
 					if pileupcolumn.pos==basepos:
@@ -380,16 +393,17 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 							# print "read {} --> {}".format(pileupread.alignment.qname,pileupread.alignment.query[pileupread.qpos])
 							try:
 								sambase = pileupread.alignment.query[pileupread.qpos].upper()
+								strand  = int(pileupread.alignment.is_reverse) ## 0: F, 1:R
 							except IndexError:
 								continue ## cuased by reads returned not spanning the basepos. Soft clipping?
 
-							if pass_filter(pileupread,pileupread.qpos) and sambase in DNA: # filtering
+							if pass_filter(pileupread,[pileupread.qpos]) and sambase in DNA: # filtering
 								if rev:
-									bases[RC[sambase]] += 1
+									bases[RC[sambase]][strand] += 1
 								else:
-									bases[sambase] += 1
+									bases[sambase][strand] += 1
 
-				ret.append( {k: v for k, v in bases.iteritems() if v} ) ## filters out bases with no reads!
+				ret.append( {k: v[0]+v[1] for k, v in bases.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth}	 ) ## filters out bases with no reads or strand read depth below cutoff
 
 			else: ## item is a tuple --> codon (three bases) (we hope)
 				assert(len(item)==3)
@@ -416,11 +430,13 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 
 							# check passed filter and that all three bases are A/T/C/G
 							if sum(x in DNA for x in triplet)==3 and pass_filter(pileupread,qposns):
-								try:
-									codons["".join(triplet)]+=1
-								except KeyError:
-									codons["".join(triplet)]=1
-				ret.append( codons ) ## push the result onto the return stack
+								strand  = int(pileupread.alignment.is_reverse) ## 0: F, 1:R
+								tripletstr = "".join(triplet)
+								if tripletstr not in codons:
+									codons[tripletstr] = [0,0]
+								codons[tripletstr][strand] += 1
+
+				ret.append( {k: v[0]+v[1] for k, v in codons.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth} )
 		return ret
 
 ## FN TO RETURN ALL BAM FILES IN SCOPE

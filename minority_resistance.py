@@ -270,10 +270,14 @@ class Variation(object):
 
 			## write to R tab file via a writer fn which uses **kwargs
 			nameMap = {'WT':'WT','ALT':'published','OTHER':'other','SWEEP':'fixed'}
+			namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype=='gene' else self.name
+			# write the depth information for everything (easy to filter out at plotting time)
+			writeR(file=fname, name=namestr, mutation='depth', frac=sum(item.values()))
 			if self.ttype=='gene' or data['ALT'] + data['OTHER'] > 0:
 				for mutationType,value in data.items():
 					if value > 0:
-						writeR(file=fname, name="{}_{:0>4d}".format(self.genename, posInGene), mutation=nameMap[mutationType], frac=value)
+						writeR(file=fname, name=namestr, mutation=nameMap[mutationType], frac=value)
+
 
 			## here's where we could store the values if desired (e.g. setter fn)
 
@@ -451,7 +455,7 @@ def parse_bcf_bam_files(cwd):
 	print "[progress-update] found {} bam files".format(len(files.keys()))
 	if len(files.keys())==0:
 		print "[error] no bam files found!!!"
-		os.exit(2)
+		sys.exit(1)
 	return files
 
 ## CALL RSCRIPT (given a call array)
@@ -497,6 +501,8 @@ if __name__ == "__main__":
 	files = parse_bcf_bam_files(options.bcfdir)
 
 	alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
+	# pdb.set_trace()
+
 
 	# associate AA alleles with genes chosen for analysis (if there are any...)
 	for gene in genes: gene.associate_alleles(alleles)

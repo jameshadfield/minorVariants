@@ -26,13 +26,13 @@ if (length(commandArgs(trailingOnly=TRUE))) {
   ylimUpper    <-  plot_params[3]
 } else { ## interactive // testing --> this section changes frequently
   interactive  <-  TRUE
-  workDir      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/23S_mutations"
-  fname        <-  "H.alleles.tab"
-  tabName      <-  "23Smutations.tab"
-  geneName     <-  ""
-  geneAnalysis <-  FALSE
-  ncol         <-  2
-  ylimUpper    <-  0.2
+  workDir      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/test/"
+  fname        <-  "tst4.genes.tab"
+  tabName      <-  "test.tab"
+  geneName     <-  "rgene"
+  geneAnalysis <-  TRUE
+  ncol         <-  1
+  ylimUpper    <-  1
 }
 
 # LIBRARIES:
@@ -74,6 +74,7 @@ draw <- function(resistancedf) {
   # GG <- GG + scale_fill_brewer(palette="YlGnBu")
   GG <- GG + theme(legend.position="bottom")
   if (geneAnalysis) {
+#     GG <- GG + scale_x_discrete(labels = xLabels)
     GG <- GG + scale_x_discrete(breaks=NULL)
     GG <- GG + xlab(geneName)
   } else {
@@ -85,14 +86,8 @@ draw <- function(resistancedf) {
   return(GG)
 }
 
-# Multiple plot function
-# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
-# - cols:   Number of columns in layout
-# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
-# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
-# then plot 1 will go in the upper left, 2 will go in the upper right, and
-# 3 will go all the way across the bottom.
-#
+# Multiple plot function -- ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)- cols:   Number of columns in layout- layout: A matrix specifying the layout. If present, 'cols' is ignored.
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),then plot 1 will go in the upper left, 2 will go in the upper right, and 3 will go all the way across the bottom.
 multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
   require(grid)
   plots <- c(list(...), plotlist)
@@ -114,6 +109,7 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 setwd(workDir)
 resistancedf <- read.table(fname,header=T,sep="\t",comment.char='', stringsAsFactors=F)
 resistancedf <- resistancedf[resistancedf$mutation!="WT",] #get rid of wt fraction (else all bars range [0,1])
+resistancedf <- resistancedf[resistancedf$mutation!="depth",] #get rid of depth fraction (else all bars range [0,1])
 if (geneAnalysis) {  # restrict to chosen gene name
   resistancedf <- resistancedf[grepl(geneName,resistancedf$position),]
 }

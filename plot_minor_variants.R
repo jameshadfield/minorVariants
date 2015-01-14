@@ -26,13 +26,13 @@ if (length(commandArgs(trailingOnly=TRUE))) {
   ylimUpper    <-  plot_params[3]
 } else { ## interactive // testing --> this section changes frequently
   interactive  <-  TRUE
-  workDir      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/test/"
-  fname        <-  "tst4.genes.tab"
-  tabName      <-  "test.tab"
+  workDir      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/chr_mutations/"
+  fname        <-  "lineages.alleles.tab"
+  tabName      <-  "mutations.tab"
   geneName     <-  "rgene"
-  geneAnalysis <-  TRUE
-  ncol         <-  1
-  ylimUpper    <-  1
+  geneAnalysis <-  FALSE
+  ncol         <-  6
+  ylimUpper    <-  0.2
 }
 
 # LIBRARIES:
@@ -46,10 +46,11 @@ draw <- function(resistancedf) {
   xLabels <- sort(unique(as.character(resistancedf$position)))
   if (! geneAnalysis) { ## attach drug information to X labels
     ## quickly parse the tabfile to get the bindings of gene -> drug (if applicable)
-    drugMap <- read.table(tabName,header=T,sep="",comment.char='', stringsAsFactors=F)[,c(1,10)]
+    drugMap <- read.table(tabName,header=T,sep="",comment.char='', stringsAsFactors=F)[,c(1,9,10)]
     stack <- vector()
     for (label in xLabels) {
-      drug <- Filter(function(x) x!="-",drugMap[drugMap[,1]==strsplit(label, "_")[[1]][[1]],2])[1]
+#       drug <- Filter(function(x) x!="-", drugMap[drugMap[,3]==strsplit(label, "_")[[1]][[1]],3] )[1]
+      drug <- Filter(function(x) x!="-", drugMap[drugMap[,2]==label,3])
       if (is.na(drug)) {drug = ""}
       stack <- c(stack, drug) 
     }

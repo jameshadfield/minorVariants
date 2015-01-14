@@ -8,8 +8,9 @@ from pprint import pprint
 from glob import glob
 import pdb
 import argparse
-import pysam
 from Bio import SeqIO
+import pysam
+
 
 
 ### PARSE OPTIONS ###
@@ -112,19 +113,26 @@ def parse_tabfile(tabfile,sanger):
 								baseList = [tuple([ genebase1 + 1 - x for x in genebasepos ])] ## order forms the codon. important
 							else:
 								baseList = [tuple([ genebase1 - 1 + x for x in genebasepos ])]
-						except ValueError: ## three dashes mean analyse the entire gene...
-							ttype="gene"
-							if (abs(genebase1 - geneendbase) + 1) % 3:
-								raise ParseError("Length of gene {} ({}) is not a multiple of 3. Skipping.",genename,fields[2])
-							if rev:
-								baseList = [(x,x-1,x-2) for x in range(genebase1,geneendbase-1,-3)]
-							else:
-								baseList = [(x,x+1,x+2) for x in range(genebase1,geneendbase+1, 3)]
+						except ValueError: ## three dashes mean analyse the entire gene... but is it DNA or AA we want?
+							if 'DNA' in name.upper():
+								ttype='dnagene'
+								if rev:
+									baseList = [(x,) for x in range(genenbase1,geneendbase-1,-1)]
+								else:
+									baseList = [(x,) for x in range(genebase1,geneendbase+1, 1)]
+							else: ## AA is the default
+								ttype='aagene'
+								if (abs(genebase1 - geneendbase) + 1) % 3:
+									raise ParseError("Length of gene {} ({}) is not a multiple of 3. Skipping.",genename,fields[2])
+								if rev:
+									baseList = [(x,x-1,x-2) for x in range(genebase1,geneendbase-1,-3)]
+								else:
+									baseList = [(x,x+1,x+2) for x in range(genebase1,geneendbase+1, 3)]
 
 				##### we now have the basic stuff done as well as a list of bases (baseList)
 				##### all that is left is to extract the amino acid / base (if specified)
 				##### N.B. these may be on the - strand but that is OK. Other functions can complement them easily
-				if ttype!='gene':
+				if ttype not in ['aagene','dnagene']:
 					tabAlleles = [tuple(str(fields[6]).upper().split(',')) ,tuple(str(fields[7]).upper().split(','))]
 					check_if_legit(ttype,tabAlleles,line)
 
@@ -139,7 +147,7 @@ def parse_tabfile(tabfile,sanger):
 						listOfAlleleObjs.append(newObj)
 
 				## create a Gene object if this gene has *not* been seen before *AND* we are analysing the entire gene...
-				elif ttype=="gene" and genename not in seenGeneNames:
+				elif ttype in ['dnagene','aagene'] and genename not in seenGeneNames:
 					try:
 						newObj = Variation(ttype,genename,chrom,baseList,rev,name,drug)
 					except AssertionError:
@@ -173,7 +181,7 @@ class Variation(object):
 
 	def __init__(self,ttype,gn,chrm,bl,rev,name,drug,alleles=None,pos=None):
 		self.ttype    = ttype
-		assert(ttype in ['dna','aa','gene'])
+		assert(ttype in ['dna','aa','aagene','dnagene'])
 		self.genename = gn
 		self.chrom 	  = chrm
 		self.baseList = bl
@@ -202,7 +210,7 @@ class Variation(object):
 		self.pileup = bamobj.pileup(self.chrom,self.baseList,self.rev,minStrandDepth,minMapQual,minBaseQual)
 
 		## turn triplets into amino acids. this cannot be shortened as there may be collisions
-		if self.ttype in ['aa','gene']:
+		if self.ttype in ['aa','aagene']:
 			self.aapileup=[]
 			for x in self.pileup:
 				res = {}
@@ -223,9 +231,9 @@ class Variation(object):
 		"""
 
 		# choose which pileup structure we analyse
-		if self.ttype=='dna':
+		if self.ttype in ['dna','dnagene']:
 			pileup=self.pileup
-		elif self.ttype in ['aa','gene']:
+		elif self.ttype in ['aa','aagene']:
 			pileup=self.aapileup
 
 		for idx,item in enumerate(pileup): ## this goes through the bases or amino acid POSITIONS analysed (only one item for a AA / DNA mutation)
@@ -244,13 +252,13 @@ class Variation(object):
 				### wwhat's normal / ALT?
 				try:
 					WT,ALT,posInGene = self.WT, self.ALT, self.posInGene
-				except AttributeError:
-					WT, posInGene = self.aaseq[idx], idx+1
-					try:
+				except AttributeError: ## it's a gene --> self.X hasn't been set
+					posInGene = idx+1
+					WT = self.aaseq[idx] if self.ttype=='aagene' else self.dnaseq[idx]
+					try: ## has a variant been associated??
 						ALT = self.resistanceAlleles[posInGene].ALT
 					except KeyError:
 						ALT = []
-
 				depthfrac = float(depth) / cov
 				if base_or_codon in WT:
 					data['WT'] += depthfrac
@@ -265,15 +273,15 @@ class Variation(object):
 					else:
 						data['OTHER'] += depthfrac
 						nstr=''
-					if not self.ttype=='gene': ## surpress output for gene
+					if not self.ttype in ['dnagene','aagene']: ## surpress output for gene
 						print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
 
 			## write to R tab file via a writer fn which uses **kwargs
 			nameMap = {'WT':'WT','ALT':'published','OTHER':'other','SWEEP':'fixed'}
-			namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype=='gene' else self.name
+			namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype in ['dnagene','aagene'] else self.name
 			# write the depth information for everything (easy to filter out at plotting time)
 			writeR(file=fname, name=namestr, mutation='depth', frac=sum(item.values()))
-			if self.ttype=='gene' or data['ALT'] + data['OTHER'] > 0:
+			if self.ttype in ['dnagene','aagene'] or data['ALT'] + data['OTHER'] > 0:
 				for mutationType,value in data.items():
 					if value > 0:
 						writeR(file=fname, name=namestr, mutation=nameMap[mutationType], frac=value)
@@ -317,32 +325,40 @@ class Variation(object):
 			else:
 				print "[reference-check] {} had reference bases {} coding for {} but {} was specified in the tabfile".format(self.name, refseqcodon, refseqaa, self.WT)
 
-	# def add_pileup_counts(self,bamobj):
-	# 	if self.ttype=='dna':
-	# 		self.pileup = self.calculate_pileup_counts_DNA(bamobj,self.chrpos[0])
-	# 	else: ## aa
-	# 		self.pileup, self.codonpileup = self.calculate_pileup_counts_AA(bamobj,self.chrpos)
+	def set_ref_info(self,records):
+		""" get the amino acids at each codon // bases at each position
+		from a fasta sequence (0-based) and save to self.aaseq // self.dnaseq"""
+		if self.ttype=='aagene':
+			self.aaseq = []
+			for idx,posns in enumerate(self.baseList):
+				if self.rev:
+					triplet = [ sanger.RC[records[self.chrom].seq[x-1]].upper() for x in posns ]
+				else:
+					triplet = [ records[self.chrom].seq[x-1].upper() for x in posns ]
+				refAA = sanger.codon2aa["".join(triplet)]
+				## sanity checking
+				if idx==0 and refAA != 'M':
+					print "[warning] first base in gene {} was {} (expected M)".format(self.genename,refAA)
+				elif idx+1==len(self.baseList) and refAA != '*':
+					print "[warning] final base in gene {} was {} (expected *)".format(self.genename,refAA)
+				## if theres a registered allele, check refAA is the same as ALT (careful indexing)
+				if idx+1 in self.resistanceAlleles:
+					if refAA not in self.resistanceAlleles[idx+1].WT:
+						print "[warning] Gene {} position {} has a {} but the resistance WT allele at this position is {}".format(self.genename, idx+1, refAA, self.resistanceAlleles[idx+1].WT)
+				self.aaseq.append(refAA)
+		elif self.ttype=='dnagene':
+			self.dnaseq = []
+			for idx,posns in enumerate(self.baseList):
+				refBASE = records[self.chrom].seq[posns[0]-1].upper()
+				if refBASE not in sanger.dna: refBASE='N'
+				if self.rev:	refBASE = sanger.RC[refBASE]
+				## if theres a registered allele, check refBASE is the same as ALT (careful indexing)
+				if idx+1 in self.resistanceAlleles:
+					if refBASE not in self.resistanceAlleles[idx+1].WT:
+						print "[warning] Gene {} position {} has a {} but the resistance WT allele at this position is {}".format(self.genename, idx+1, refBSE, self.resistanceAlleles[idx+1].WT)
+				self.dnaseq.append(refBASE)
 
 
-	def set_codon_info(self,records):
-		""" get the amino acids at each codon from a fasta sequence (0-based) and save to self.aaseq """
-		self.aaseq = []
-		for idx,posns in enumerate(self.baseList):
-			if self.rev:
-				triplet = [ sanger.RC[records[self.chrom].seq[x-1]].upper() for x in posns ]
-			else:
-				triplet = [ records[self.chrom].seq[x-1].upper() for x in posns ]
-			refAA = sanger.codon2aa["".join(triplet)]
-			## sanity checking
-			if idx==0 and refAA != 'M':
-				print "[warning] first base in gene {} was {} (expected M)".format(self.genename,refAA)
-			elif idx+1==len(self.baseList) and refAA != '*':
-				print "[warning] final base in gene {} was {} (expected *)".format(self.genename,refAA)
-			## if theres a registered allele, check refAA is the same as ALT (careful indexing)
-			if idx+1 in self.resistanceAlleles:
-				if refAA not in self.resistanceAlleles[idx+1].WT:
-					print "[warning] Gene {} position {} has a {} but the resistance WT allele at this position is {}".format(self.genename, idx+1, refAA, self.resistanceAlleles[idx+1].WT)
-			self.aaseq.append(refAA)
 
 ### WRAPPER FOR SAMTOOLS. IMPLEMENTS FILTERING.
 class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
@@ -501,20 +517,17 @@ if __name__ == "__main__":
 	files = parse_bcf_bam_files(options.bcfdir)
 
 	alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
-	# pdb.set_trace()
-
 
 	# associate AA alleles with genes chosen for analysis (if there are any...)
 	for gene in genes: gene.associate_alleles(alleles)
-
 
 	## USE REFERNCE SEQ TO CHECK CORRECTNESS
 	with open(options.fasta, "rU") as fh:
 		records = SeqIO.to_dict(SeqIO.parse(fh, "fasta"))
 		for allele in alleles: ## ensure bases are correct
 			allele.check_against_ref(records)
-		for gene in genes: ## add in reference codons
-			gene.set_codon_info(records)
+		for gene in genes: ## add in reference codons / bases
+			gene.set_ref_info(records)
 
 	## OPEN OUTPUT FILE HANDLES
 	if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
@@ -536,7 +549,7 @@ if __name__ == "__main__":
 			allele.interpret(writeRalleles) ## does not store data, passes it to writeRalleles
 
 		for gene in genes:
-			print "[progress-update] calculating AA variation in gene {} sequence {}".format(gene.genename,fname)
+			print "[progress-update] calculating variation in {} {} sequence {}".format(gene.ttype, gene.genename,fname)
 			sys.stdout.flush()
 			gene.set_pileup_counts(bam)
 			gene.interpret(writeRgenes)

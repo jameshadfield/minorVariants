@@ -114,7 +114,7 @@ def parse_tabfile(tabfile,sanger):
 							else:
 								baseList = [tuple([ genebase1 - 1 + x for x in genebasepos ])]
 						except ValueError: ## three dashes mean analyse the entire gene... but is it DNA or AA we want?
-							if 'DNA' in name.upper():
+							if 'DNA' in name.upper() or 'RNA' in name.upper():
 								ttype='dnagene'
 								if rev:
 									baseList = [(x,) for x in range(genenbase1,geneendbase-1,-1)]

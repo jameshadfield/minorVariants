@@ -278,13 +278,15 @@ class Variation(object):
 
 			## write to R tab file via a writer fn which uses **kwargs
 			nameMap = {'WT':'WT','ALT':'published','OTHER':'other','SWEEP':'fixed'}
-			namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype in ['dnagene','aagene'] else self.name
+			namestr = self.genename
+			pos     = posInGene
+			# namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype in ['dnagene','aagene'] else self.name
 			# write the depth information for everything (easy to filter out at plotting time)
-			writeR(file=fname, name=namestr, mutation='depth', frac=sum(item.values()))
+			writeR(file=fname, name=namestr, pos=pos, mutation='depth', frac=sum(item.values()))
 			if self.ttype in ['dnagene','aagene'] or data['ALT'] + data['OTHER'] > 0:
 				for mutationType,value in data.items():
 					if value > 0:
-						writeR(file=fname, name=namestr, mutation=nameMap[mutationType], frac=value)
+						writeR(file=fname, name=namestr, pos=pos, mutation=nameMap[mutationType], frac=value)
 
 
 			## here's where we could store the values if desired (e.g. setter fn)
@@ -292,8 +294,11 @@ class Variation(object):
 	def associate_alleles(self,alleles):
 		self.resistanceAlleles = {}
 		for allele in alleles: ## given list of all allele objects
-			if allele.genename == self.genename and allele.ttype == 'aa':
-				self.resistanceAlleles[allele.posInGene] = allele ## this seems dangerous
+			if allele.genename == self.genename:
+				if allele.ttype == 'aa':
+					self.resistanceAlleles[allele.posInGene] = allele ## this seems dangerous
+				elif allele.ttype == 'dna':
+					self.resistanceAlleles[allele.posInGene] = allele ## this seems dangerous
 
 
 	def check_against_ref(self,refseq):
@@ -500,13 +505,13 @@ def call_R(tabfile, savename, geneName=False, numCol=1, yMax=1, log=False):
 def open_rwriter(fname):
 	"""a closure to open a filehandle and return a writer function"""
 	fh = open(fname,'w')
-	fh.write("sequence\tposition\tmutation\tfrac\n") ##header line
+	fh.write("sequence\tname\tposition\tmutation\tfrac\n") ##header line
 	def rwriter(**kwargs):
 		## fh is in scope (closure)
 		if 'close' in kwargs:
 			fh.close()
 			return
-		fh.write("{}\t{}\t{}\t{:.4f}\n".format(kwargs['file'],kwargs['name'],kwargs['mutation'],kwargs['frac']))
+		fh.write("{}\t{}\t{}\t{}\t{:.4f}\n".format(kwargs['file'],kwargs['name'],kwargs['pos'],kwargs['mutation'],kwargs['frac']))
 	return rwriter
 
 if __name__ == "__main__":
@@ -520,6 +525,8 @@ if __name__ == "__main__":
 
 	# associate AA alleles with genes chosen for analysis (if there are any...)
 	for gene in genes: gene.associate_alleles(alleles)
+
+	# pdb.set_trace()
 
 	## USE REFERNCE SEQ TO CHECK CORRECTNESS
 	with open(options.fasta, "rU") as fh:

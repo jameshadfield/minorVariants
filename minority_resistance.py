@@ -10,8 +10,7 @@ import pdb
 import argparse
 from Bio import SeqIO
 import pysam
-
-
+import pytest
 
 ### PARSE OPTIONS ###
 def get_user_options():
@@ -22,6 +21,7 @@ def get_user_options():
 	parser.add_argument("-b", "--bcfdir", action="store", dest="bcfdir", help="directory with either bam files *or* SMALT folders [default: current directory]", default=".", metavar="PATH")
 	parser.add_argument("-f", "--fasta", required=True, action="store", dest="fasta", help="reference fasta sequence [REQUIRED]", default=".", metavar="FILE")
 	parser.add_argument("-p", "--prefix", required=True, action="store", dest="prefix", help="prefix for output files [REQUIRED]", default=".", metavar="STRING")
+	parser.add_argument("--noplot", required=False, action="store_false", dest="plot", help="do not attempt to plot anything", default=True)
 
 	return parser.parse_args()
 
@@ -90,10 +90,13 @@ def parse_tabfile(tabfile,sanger):
 					try:
 						if fields[2].startswith('c'):
 							coords = fields[2].split('(')[1].split(')')[0].split('..')
-							rev,genebase1,geneendbase = True,int(coords[1]),int(coords[0])
+							rev,genebase1,geneendbase = True,max(int(coords[1]),int(coords[0])),min(int(coords[1]),int(coords[0]))
 						else:
 							coords = fields[2].split('..')
-							rev,genebase1,geneendbase = False,int(coords[0]),int(coords[1])
+							if int(coords[0]) <= int(coords[1]):
+								rev,genebase1,geneendbase = False,int(coords[0]),int(coords[1])
+							else:
+								rev,genebase1,geneendbase = True,int(coords[1]),int(coords[0])
 					except ValueError:
 						raise ParseError("Failed to parse the gene co-ordinates [skipping] ",line)
 
@@ -195,12 +198,12 @@ class Variation(object):
 
 
 	def set_pileup_counts(self,bamobj):
-		"""this method generates a list of positions / tuples for pileup to act upon
-		these are then sent to bamobj.pileup, along with the filtering parameters
+		"""this method sends a list of tuples (baseList) for pileup to act upon (bamobj.pileup)
+		filtering is done by (bamobj.pileup)
 		the results are stored in this object as self.pileup which is dict of DNA/CODON -> count
 		if amino acid(s) then another object self.aapileup is generated which is dict of AA->count
 		if this is a gene, the consensus seq could be pieced together via
-		[ max(x.iterkeys(), key=(lamda key: x[key])) for x in self.aapileup ]
+		"".join([ max(x.iterkeys(), key=(lamda key: x[key])) for x in self.aapileup ])
 		"""
 
 		minStrandDepth=5
@@ -301,7 +304,7 @@ class Variation(object):
 					self.resistanceAlleles[allele.posInGene] = allele ## this seems dangerous
 
 
-	def check_against_ref(self,refseq):
+	def check_against_ref(self,records,sanger):
 		#refseq should be Bio.SeqIO.parse() dict
 		# refseq has zero-based co-ord system (like a bam file)
 		if self.ttype=='dna':
@@ -309,16 +312,17 @@ class Variation(object):
 				refseqbase = records[self.chrom].seq[self.baseList[0][0]-1].upper()
 			except KeyError:
 				print "[error] {} not found in the reference fasta -- this script will probably die soon".format(self.chrom)
-				return
+				return False
 			except IndexError:
 				print "[error] position {} not found in the reference fasta  -- this script will probably die soon".format(self.baseList[0]-1)
-				return
+				return False
 			base = [sanger.RC[x] for x in self.WT] if self.rev else self.WT ## may need to turn them into + strand
 			if refseqbase in base:
 				print "[reference-check] {} matched reference".format(self.name)
+				return True
 			else:
 				print "[reference-check] {} specified {} in the tabfile but has {} in the reference ({} strand)".format(self.name,self.WT,refseqbase,'-' if self.rev else '+')
-
+				return False
 		elif self.ttype=='aa':
 			refseqbases = [ records[self.chrom].seq[x-1].upper() for x in self.baseList[0] ] ## order correct but is strand correct?
 			if self.rev:
@@ -327,10 +331,12 @@ class Variation(object):
 			refseqaa    = sanger.codon2aa[refseqcodon]
 			if refseqaa in self.WT:
 				print "[reference-check] {} matched reference ({} -> {})".format(self.name,refseqcodon,refseqaa)
+				return True
 			else:
 				print "[reference-check] {} had reference bases {} coding for {} but {} was specified in the tabfile".format(self.name, refseqcodon, refseqaa, self.WT)
+				return False
 
-	def set_ref_info(self,records):
+	def set_ref_info(self,records,sanger):
 		""" get the amino acids at each codon // bases at each position
 		from a fasta sequence (0-based) and save to self.aaseq // self.dnaseq"""
 		if self.ttype=='aagene':
@@ -363,8 +369,6 @@ class Variation(object):
 						print "[warning] Gene {} position {} has a {} but the resistance WT allele at this position is {}".format(self.genename, idx+1, refBSE, self.resistanceAlleles[idx+1].WT)
 				self.dnaseq.append(refBASE)
 
-
-
 ### WRAPPER FOR SAMTOOLS. IMPLEMENTS FILTERING.
 class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 	"""don't forget: bamfiles are zero-base
@@ -394,74 +398,105 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		def pass_filter(pileupread,qposns):
 			### fail if optical/PCR duplicate
 			if pileupread.alignment.is_duplicate:
+				# print "\tduplicate"
 				return False
 			### check mapping quality
 			if int(pileupread.alignment.mapq)<minMapQual:
+				# print "\tquality"
 				return False
 			### check base call quality
 			for qpos in qposns:
 				if ord(pileupread.alignment.qual[qpos])<minBaseQual:
-					return False
+					return False ### changed 18may2015
 			return True
+
+		def give_me_bases(baseList,rev):
+			if rev: ## give them out in reverse order!
+				for idx in xrange(len(baseList)-1,-1,-1):
+					tup = baseList[idx]
+					yield(idx,tup,len(tup)==1,self.bcfpos2bampos(min(tup)))
+			else:
+				for idx,tup in enumerate(baseList):
+					yield(idx,tup,len(tup)==1,self.bcfpos2bampos(min(tup)))
+
 
 		ret = []
 		RC = {'A':'T','T':'A','C':'G','G':'C','N':'N'}
 		DNA = {'A','T','C','G'}
-		for item in baseList:
-			if len(item)==1: # tuple of length 1 => a base
-				bases = {'C':[0,0],'T':[0,0],'A':[0,0],'G':[0,0]}
-				basepos = self.bcfpos2bampos(item[0])
-				for pileupcolumn in self.samfile.pileup(chrom, basepos, basepos+1):
-					if pileupcolumn.pos==basepos:
-						coverage = pileupcolumn.n
-						for pileupread in pileupcolumn.pileups:
-							# print "read {} --> {}".format(pileupread.alignment.qname,pileupread.alignment.query[pileupread.qpos])
+
+		##### get the pileup here over the maximum range provided in baseList :)
+		#		note that baselist is a list of tuples each of length 1 or 3
+		#		pileup is an iterator that cannot be re-wound so be careful how you use it
+		bambasemin = self.bcfpos2bampos( min([min(x) for x in baseList]) )
+		bambasemax = self.bcfpos2bampos( max([max(x) for x in baseList]) )
+		pileupiter = self.samfile.pileup(chrom, bambasemin, bambasemax+1)
+		bases_generator = give_me_bases(baseList,rev)
+		ret = [{}] * len(baseList) ### initialise
+
+		# print "pilup iter is done over bases {} to {}".format(bambasemin, bambasemax+1)
+		# print "\n\nbaselist: {}".format(baseList)
+
+		#### we iterate over the baseList (generator) ## always increasing
+		#       we then iterate through the pileups (iterator) ## always increasing
+		#           take the pileup.pos that matches min(baseList)
+		#			 when this has been completed, the results is appended to ret
+
+		for idx,bases_here,singleton,base1 in bases_generator:
+			# print "just been given {} (1-based) (idx {}, singleton: {}, smallest: {} (0-based))".format(bases_here, idx, singleton,base1)
+			for pileupcolumn in pileupiter:
+				pileuppos = pileupcolumn.pos
+				if pileuppos > base1:
+					### this is a problem -- it means that the pileuppos has jumped ahead of what we wanted (due to lack of reads spanning the beginning bases most likely). But we've used up our iterators, and we should keep this position (pileup). Clearly we can throw away the base1 stuff as it's blank (although we should save the results as blank...)
+
+					## request (next()) bases from give_me_bases until we catch up with the pileup
+					while pileuppos > base1:
+						idx,bases_here,singleton,base1 = next(bases_generator)
+
+				if base1==pileuppos:
+					# print "pileup column {} coverage {}".format(pileuppos,pileupcolumn.n)
+					if singleton:
+						tmp = {'C':[0,0],'T':[0,0],'A':[0,0],'G':[0,0]}
+					else: ## TRIPLET // CODON
+						tmp = {}
+					# coverage = pileupcolumn.n
+					for pileupread in pileupcolumn.pileups:
+						### we could be trying to find a single base or a codon
+						if singleton:
 							try:
 								sambase = pileupread.alignment.query[pileupread.qpos].upper()
-								strand  = int(pileupread.alignment.is_reverse) ## 0: F, 1:R
 							except IndexError:
-								continue ## cuased by reads returned not spanning the basepos. Soft clipping?
-
-							if pass_filter(pileupread,[pileupread.qpos]) and sambase in DNA: # filtering
+								continue ## cuased by reads returned not spanning base. soft clipping?
+							if pass_filter(pileupread,[pileupread.qpos]) and sambase in DNA:
+								strand  = int(pileupread.alignment.is_reverse) ## 0: F, 1:R
 								if rev:
-									bases[RC[sambase]][strand] += 1
+									tmp[RC[sambase]][strand] += 1
 								else:
-									bases[sambase][strand] += 1
-
-				ret.append( {k: v[0]+v[1] for k, v in bases.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth}	 ) ## filters out bases with no reads or strand read depth below cutoff
-
-			else: ## item is a tuple --> codon (three bases) (we hope)
-				assert(len(item)==3)
-				if rev:
-					assert(item[0]-1==item[1] and item[1]-1==item[2])
-					bambasemin, bambasemax = self.bcfpos2bampos(item[2]), self.bcfpos2bampos(item[0]) ## samtools needs in increasing order
-				else:
-					assert(item[0]+1==item[1] and item[1]+1==item[2])
-					bambasemin, bambasemax = self.bcfpos2bampos(item[0]), self.bcfpos2bampos(item[2])
-
-				codons = {}
-				for pileupcolumn in self.samfile.pileup(chrom, bambasemin, bambasemax):
-					# pdb.set_trace()
-					if pileupcolumn.pos==bambasemin:
-						for pileupread in pileupcolumn.pileups:
+									tmp[sambase][strand] += 1
+						else: ## TRIPLET -> CODON -> AA
+							qposns  = (pileupread.qpos, pileupread.qpos+1, pileupread.qpos+2)
 							try:
-								qposns  = (pileupread.qpos, pileupread.qpos+1, pileupread.qpos+2)
 								if rev:
 									triplet = [RC[pileupread.alignment.query[x].upper()] for x in qposns[::-1]]
 								else:
 									triplet = [pileupread.alignment.query[x].upper() for x in qposns]
-							except IndexError: # didn't span the codon
-								continue
-
-							# check passed filter and that all three bases are A/T/C/G
+							except IndexError:
+								continue ## cuased by reads returned not spanning the codon
 							if sum(x in DNA for x in triplet)==3 and pass_filter(pileupread,qposns):
 								strand  = int(pileupread.alignment.is_reverse) ## 0: F, 1:R
 								tripletstr = "".join(triplet)
-								if tripletstr not in codons:
-									codons[tripletstr] = [0,0]
-								codons[tripletstr][strand] += 1
+								if tripletstr not in tmp:
+									tmp[tripletstr] = [0,0]
+								tmp[tripletstr][strand] += 1
 
-				ret.append( {k: v[0]+v[1] for k, v in codons.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth} )
+					### we've now finished analysing a particular column in the pileup, time to save the results
+					if singleton:
+						ret[idx]={k: v[0]+v[1] for k, v in tmp.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth} ## filters out bases with no reads or strand read depth below cutoff
+					else: ## TRIPLET ?? CODON
+						ret[idx]={k: v[0]+v[1] for k, v in tmp.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth}
+					### now we need to stop iterating the pileupiter as we don't want to consume another position (it may be the one in the next part of baseList!!!!)
+					break
+
+		# print "return time. ret: {}".format(ret)
 		return ret
 
 ## FN TO RETURN ALL BAM FILES IN SCOPE
@@ -523,7 +558,7 @@ if __name__ == "__main__":
 
 	alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
 
-	# associate AA alleles with genes chosen for analysis (if there are any...)
+	# associate alleles with genes chosen for analysis (if there are any...)
 	for gene in genes: gene.associate_alleles(alleles)
 
 	# pdb.set_trace()
@@ -532,15 +567,15 @@ if __name__ == "__main__":
 	with open(options.fasta, "rU") as fh:
 		records = SeqIO.to_dict(SeqIO.parse(fh, "fasta"))
 		for allele in alleles: ## ensure bases are correct
-			allele.check_against_ref(records)
+			allele.check_against_ref(records,sanger)
 		for gene in genes: ## add in reference codons / bases
-			gene.set_ref_info(records)
+			gene.set_ref_info(records,sanger)
 
 	## OPEN OUTPUT FILE HANDLES
 	if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
 	if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
 
-	## parse the BCF files one by one (logically this seems the most efficient)
+	## parse the BAM files one by one (logically this seems the most efficient)
 	seqcount=0
 	for fname in files:
 		# bcf = BCF(f)
@@ -565,10 +600,11 @@ if __name__ == "__main__":
 	if alleles: writeRalleles(close=1)
 
 	## CALL R ####
-	if alleles:
-		call_R(options.prefix+".alleles.tab", options.prefix+".alleles.pdf", numCol=4, yMax=1)
-	for gene in genes:
-		call_R(options.prefix+".genes.tab", options.prefix+"."+gene.genename+".genes.pdf", geneName=gene.genename, yMax=0.5)
+	if options.plot:
+		if alleles:
+			call_R(options.prefix+".alleles.tab", options.prefix+".alleles.pdf", numCol=4, yMax=1)
+		for gene in genes:
+			call_R(options.prefix+".genes.tab", options.prefix+"."+gene.genename+".genes.pdf", geneName=gene.genename, yMax=0.5)
 
 
 

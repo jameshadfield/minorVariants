@@ -24,15 +24,15 @@ if (length(commandArgs(trailingOnly=TRUE))) {
   geneAnalysis <-  as.logical(plot_params[1])  
   ncol         <-  plot_params[2]
   ylimUpper    <-  plot_params[3]
-} else { ## interactive // testing --> this section changes frequently
+} else { ## interactive // testing --> change this section at will
   interactive  <-  TRUE
-  workDir      <-  "/Volumes/user_homes_1b/nfs_j/jh22/tmp/chr_mutations/"
-  fname        <-  "lineages.alleles.tab"
+  workDir      <-  "/Volumes/jh22/het/testing/"
+  fname        <-  "big.alleles.tab"
   tabName      <-  "mutations.tab"
-  geneName     <-  "rgene"
+  geneName     <-  "23S_1"
   geneAnalysis <-  FALSE
-  ncol         <-  6
-  ylimUpper    <-  0.2
+#   ncol         <-  1
+#   ylimUpper    <-  0.2
 }
 
 # LIBRARIES:
@@ -40,130 +40,75 @@ library(ggplot2)
 library(reshape2)
 library(RColorBrewer)
 
-########## FUNCTIONS ##########
-draw <- function(resistancedf) {
-  #### first we tidy up the xlabels
-  xLabels <- sort(unique(as.character(resistancedf$position)))
-  if (! geneAnalysis) { ## attach drug information to X labels
-    ## quickly parse the tabfile to get the bindings of gene -> drug (if applicable)
-    drugMap <- read.table(tabName,header=T,sep="",comment.char='', stringsAsFactors=F)[,c(1,9,10)]
-    stack <- vector()
-    for (label in xLabels) {
-#       drug <- Filter(function(x) x!="-", drugMap[drugMap[,3]==strsplit(label, "_")[[1]][[1]],3] )[1]
-      drug <- Filter(function(x) x!="-", drugMap[drugMap[,2]==label,3])
-      if (is.na(drug)) {drug = ""}
-      stack <- c(stack, drug) 
-    }
-    xLabels <- paste(xLabels,stack,sep = "\n")
-  }
-    
-  ## ordering for ggplot:
-  resistancedf$mutation <- factor(resistancedf$mutation,levels=c("published","other","WT","fixed"), ordered=TRUE)
-  resistancedf$position <- factor(resistancedf$position, levels=sort(unique(as.character(resistancedf$position))), ordered=TRUE)
-  
-  ## ggplot
-  GG <-      ggplot(resistancedf,aes(x=position, y=frac, fill = mutation, order=mutation))
-  GG <- GG + geom_bar(stat="identity")
-  GG <- GG + facet_grid(sequence ~ . )
-  # GG <- GG + facet_wrap(~ sequence , ncol=2)
-  GG <- GG + theme(axis.text.x=element_text(angle = -45, hjust = 0))
-  GG <- GG + ylab("fraction of reads")
-  # GG <- GG + scale_fill_manual(values=c("red", "blue", "white"))
-  GG <- GG + coord_cartesian(ylim = c(0,ylimUpper)) 
-  # GG <- GG + guides(fill = guide_legend(reverse = TRUE))
-  GG <- GG + scale_fill_manual(values = rev(brewer.pal(3,"PuRd")), name="AA Mutation")
-  # GG <- GG + scale_fill_brewer(palette="YlGnBu")
-  GG <- GG + theme(legend.position="bottom")
-  if (geneAnalysis) {
-#     GG <- GG + scale_x_discrete(labels = xLabels)
-    GG <- GG + scale_x_discrete(breaks=NULL)
-    GG <- GG + xlab(geneName)
-  } else {
-    GG <- GG + scale_x_discrete(labels = xLabels) ## scale_x_discrete(breaks=as.integer(seq(from=1,to=length(xLabels),length.out=10)) ),labels=xLabels[as.integer(seq(from=1,to=length(xLabels),length.out=10))])
-    GG <- GG + xlab("mutation")
-  }
-  GG <- GG +  scale_y_continuous(breaks = seq(0,ylimUpper-0.1,0.1))
-  
-  return(GG)
-}
-
-# Multiple plot function -- ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)- cols:   Number of columns in layout- layout: A matrix specifying the layout. If present, 'cols' is ignored.
-# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),then plot 1 will go in the upper left, 2 will go in the upper right, and 3 will go all the way across the bottom.
-multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
-  require(grid)
-  plots <- c(list(...), plotlist)
-  numPlots = length(plots)
-  if (is.null(layout)) {layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),ncol = cols, nrow = ceiling(numPlots/cols))  }
-  if (numPlots==1) {
-    print(plots[[1]])
-  } else {
-    grid.newpage()
-    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
-    for (i in 1:numPlots) {
-      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
-      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,layout.pos.col = matchidx$col))
-    }
-  }
-}
-
+#######################
+#       M A I N       #
+#######################
 
 setwd(workDir)
-resistancedf <- read.table(fname,header=T,sep="\t",comment.char='', stringsAsFactors=F)
-resistancedf <- resistancedf[resistancedf$mutation!="WT",] #get rid of wt fraction (else all bars range [0,1])
-resistancedf <- resistancedf[resistancedf$mutation!="depth",] #get rid of depth fraction (else all bars range [0,1])
-if (geneAnalysis) {  # restrict to chosen gene name
-  resistancedf <- resistancedf[grepl(geneName,resistancedf$position),]
-}
+raw <- read.table(fname,header=T,sep="\t",comment.char='', stringsAsFactors=F)
+raw$sequence <- factor(raw$sequence)
 
-### the plot is quite easy to draw by calling draw(someDF) -> GGplot object (e.g. GG <- draw(resistancedf))
-### but we need to tweak formatting (e.g. num cols -> multiplot) and if we should save it!
-if ( ! interactive ){
-  height = 0.66 * length(unique(resistancedf[ , 1])) ## .66 inch per track
-  width = 20 #0.33 * length(levels(resistancedf$position)) * ncol
-  # fit to A4 page
-  if (width > 20) {width = 20} 
-  if (height > 11) {height = 11}
-  # minimum sizes:
-  if (width < 6) {width = 6}
-  if (height < 6) {height = 6}
-  pdf(saveName, width = width, height = height)
-}
+### filter out DEPTH and WT
+raw <- subset(subset(raw,mutation!="WT"),mutation!="depth")
 
-print(height)
-print(width)
+# parse the tab file of genes / alleles
+alleles <- read.table(tabName,header=T,sep="",comment.char='', stringsAsFactors=F)
+alleles <- alleles[ ! grepl("^#",alleles[,1],), ] 
+# alleles <- alleles[alleles[,1]==geneName,]
+alleles$amino.acid <- as.integer(alleles$amino.acid)
+alleles$baseInGene <- as.integer(alleles$baseInGene)
+# alleles <- alleles[ ! (is.na(alleles[,5]), ] ## could be better -- ignores baseInGenome column
+alleles$baseInGene[is.na(alleles$baseInGene)] <- 0
+alleles$amino.acid[is.na(alleles$amino.acid)] <- 0
 
-## if asked for we can display multiple plots side by side...
-seqs  <- unique(resistancedf$sequence)
-npercol  <- ceiling(length(seqs)/ncol)
-GGlist <- list()
-endVal <- 0
-for (i in 1:ncol) {
-  startVal<- endVal + 1
-  endVal  <- startVal + npercol - 1
-  print (c(length(seqs),startVal,endVal))
-  print(resistancedf[resistancedf$sequence %in% seqs[startVal:endVal],])
-  GG <- draw(resistancedf[resistancedf$sequence %in% seqs[startVal:endVal],])
-  GGlist[[i]]  <- GG
-}
-multiplot(plotlist=GGlist, layout=matrix(seq(1,ncol), nrow=1, byrow=TRUE))
 
-if ( ! interactive ){ # this saves the pdf
-  dev.off()
+#   *if* we are going to use this information to annotate on alleles in the gene plots
+#        then we need to make it only appear on the facets where this allele is present
+#        which means creating a new data.frame with a sequence column to match the faceting performed on the raw df
+alleles2 <- data.frame(pos=as.integer(),name=as.character(),drug=factor(levels=levels(factor(alleles$drug))),sequence=factor(levels=levels(raw$sequence)))
+for (idx in seq(1,nrow(alleles))) {
+  seqs.with.mutation <- raw[raw$position==alleles[idx,"baseInGene"] & raw$mutation=="published",1]
+  names.with.perc <- paste(alleles[idx,"name"],paste(raw[raw$position==alleles[idx,"baseInGene"] & raw$mutation=="published","frac"]*100,"%",sep=""),alleles[idx,"drug"],sep="   ")
+  alleles2 <- rbind(alleles2,data.frame(pos=alleles[idx,"baseInGene"],name=names.with.perc,drug=alleles[idx,"drug"],sequence=seqs.with.mutation))
 }
 
 
+#   *if* we want to focus on the gene and it's variation then we simply plot as follows:
+GG <- ggplot(data=raw,aes(x=position, y=frac)) + geom_bar(aes(fill=mutation),stat="identity") + facet_grid(sequence ~ . , scales="fixed")
+GG + geom_text(data=alleles2,mapping=aes(x=pos,y=0.5,label=name), angle = 90)
+
+#  *if* we are instead focusing on alleles then we do things differently!
+#       plot is faceted on a new variable (raw$name+position), with raw$sequence being the x-axis
+raw$newname=""
+for (idx in seq(1,nrow(raw))) {
+  tmp <- alleles[alleles[,1]==raw[idx,"name"] & ( alleles$amino.acid==raw[idx,"position"] | alleles$baseInGene==raw[idx,"position"] ) , ]
+  raw[idx,"newname"]=paste(tmp[1,1],tmp[1,"name"],sep="_")
+}
+
+GG <- ggplot(data=raw,aes(x=sequence,y=frac)) + geom_bar(aes(fill=mutation),stat="identity") + facet_grid(newname ~ . , scales="fixed") + expand_limits(y=c(0,.2))
+GG + theme(axis.text.x=element_text(angle = -45, hjust = 0))
 
 
 
-# ## e.g. how many strains have a "published" mutation >5% in rplD (azithro)?
-# length(unique(resistancedf[resistancedf$position=="rplD_66" & resistancedf$mutation=="published" & resistancedf$frac>=0.05 , 1]))
-# ## e.g. how many strains have a "other" mutation >5% in rplD (azithro)?
-# length(unique(resistancedf[resistancedf$position=="rplD_66" & resistancedf$mutation=="other" & resistancedf$frac>=0.05 , 1]))
-# 
-# ## e.g. how many strains have a "other" mutation >5% in rpoB ?
-# length(unique(resistancedf[grepl('rpoB',resistancedf$position) & resistancedf$mutation=="other" & resistancedf$frac>=0.05 , 1]))
-# ## e.g. how many strains have a "published" mutation >5% in rpoB ?
-# length(unique(resistancedf[grepl('rpoB',resistancedf$position) & resistancedf$mutation=="published" & resistancedf$frac>=0.05 , 1]))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

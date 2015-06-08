@@ -120,7 +120,7 @@ def parse_tabfile(tabfile,sanger):
 							if 'DNA' in name.upper() or 'RNA' in name.upper():
 								ttype='dnagene'
 								if rev:
-									baseList = [(x,) for x in range(genenbase1,geneendbase-1,-1)]
+									baseList = [(x,) for x in range(genebase1,geneendbase-1,-1)]
 								else:
 									baseList = [(x,) for x in range(genebase1,geneendbase+1, 1)]
 							else: ## AA is the default

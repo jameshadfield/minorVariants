@@ -27,7 +27,7 @@ p <- add.argument(p, "--ref", help="reference tab file (contains genes)")
 p <- add.argument(p, "--wd", help="working directory", default=".")
 p <- add.argument(p, "--pdf", help="name of output (pdf) file")
 if (interactive()) {
-  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/L1_L942.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/"));
+  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/D_UW3.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/"));
 } else {
   argv <- parse.args(p, argv = commandArgs(trailingOnly = TRUE))
 }
@@ -65,8 +65,9 @@ raw$frac <- apply(raw,1,makeAlleleMinor)
 epsilon <- 0.01  ## 1%
 raw <- subset(raw,frac>=epsilon)
 # for (idx in seq(1,nrow(newdata))) { if (newdata[idx,"frac"]>0.5) {newdata[idx,"frac"] <- 1 - newdata[idx,"frac"] }  } ## slow
-GG <- ggplot(data=raw,aes(x=gpos, y=frac)) + geom_point(size=2,aes(colour=mutation)) + facet_wrap(~sequence, scales="fixed", ncol=1)
-# GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.1,label=rName,angle=45)) + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.05, ymax = -0.01), fill = "black")
+GG <- ggplot(data=raw,aes(x=gpos, y=frac)) + geom_point(size=2,aes(colour=mutation))
+GG <- GG + facet_wrap(~sequence, scales="fixed", ncol=1)
+GG <- GG + coord_cartesian(xlim=c(0,max(c(alleles$offset,raw$gpos))))
 
 ##### from the manhatten-like plot, we want all the "spikes" a.k.a. collections of points over some value to have their corresponding gene displayed...
 spike_threshold <- 0.25
@@ -113,7 +114,7 @@ for (idx in seq(1,nrow(raw))) {
 regions$x1 <- as.integer(regions$x1)
 regions$x2 <- as.integer(regions$x2)
 regions$sequence <- as.factor(regions$sequence)
-  
+
   
 GG <- GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.1,label=rName,angle=45)) + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.05, ymax = -0.01), fill = "black")
 ### whether we save or display the plot depends on whether it is being called as a script or not!

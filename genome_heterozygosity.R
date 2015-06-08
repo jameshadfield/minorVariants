@@ -1,15 +1,6 @@
 #############################################################################################################
 # This script takes output from minority_resistance relating sequences to published alleles                 #
 # and the ratio of relevent alleles at these positions.                                                     #
-# It can be run interactively (by changing values in the "parameters" section)                              #
-# or via Rscript with the following options:                                                                #
-#   RScript plot_minor_variants.R working_directory tabfileoutput tabfileinput gene output plot_params      #
-#                                        1               2            3         4       5       6           #
-#       gene:         gene name (see plot_params) (this *must* be set, even if unused)                      #
-#       tabfileout:   output from minority_resistance                                                       #
-#       tabfilein:    input to minority_resistance                                                          #
-#       output:       file to save (with pdf extension)                                                     #
-#       plot_params:  gene(1|0),numColumns,maxYvalue                                                        #
 #############################################################################################################
 
 rm(list=ls())
@@ -25,9 +16,11 @@ p <- arg.parser("Plot allelic variation over the genome");
 p <- add.argument(p, "--seq", help="name of the sequence tab file (python output)")
 p <- add.argument(p, "--ref", help="reference tab file (contains genes)")
 p <- add.argument(p, "--wd", help="working directory", default=".")
-p <- add.argument(p, "--pdf", help="name of output (pdf) file")
+p <- add.argument(p, "--prefix", help="prefix for output")
+p <- add.argument(p, "--levels", help="[FLAG] display potential levels", flag=TRUE)
+
 if (interactive()) {
-  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/D_UW3.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/"));
+  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/F_STN15.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/","--levels"));
 } else {
   argv <- parse.args(p, argv = commandArgs(trailingOnly = TRUE))
 }
@@ -57,7 +50,7 @@ raw$gpos <- raw$gpos+raw$position
 #   (geom_point as geom_bar is too sparse!)
 #   the gene names e.t.c. are shown too (maybe intelligently?)
 makeAlleleMinor <- function(x) {
-#   x == sequence   name position mutation   frac gpos
+  #   x == sequence   name position mutation   frac gpos
   if (x[[5]]>0.5) 1 - as.numeric(x[[5]])
   else as.numeric(x[[5]])
 }
@@ -78,7 +71,7 @@ IterBinSearch <- function(A, value) {
   while ( low <= high ) {
     mid <- floor((low + high)/2)
     coords <- as.numeric(unlist(regmatches(A[mid,"location"], gregexpr("[0-9]+", A[mid,"location"], perl=TRUE))))
-#     cat("value",value,"mid",mid,"coords",coords,"\n")
+    #     cat("value",value,"mid",mid,"coords",coords,"\n")
     if (coords[1] <= value && coords[2] >= value)
       return (mid)
     else if ( coords[1] > value ) #look in the lower half
@@ -102,32 +95,51 @@ for (idx in seq(1,nrow(raw))) {
       if ( ! alleles[j,"geneName"] %in% regions[regions$sequence==sequence,"rName"] ) {
         ### add into a dataframe (regions, colu mns: gName, x1, x2)
         coords <- as.integer(unlist(regmatches(alleles[j,"location"], gregexpr("[0-9]+", alleles[j,"location"], perl=TRUE))))
-#         cat("SPIKE!","at",raw[idx,"gpos"],"in",alleles[j,"geneName"],alleles[j,"location"],"sequence",as.character(raw[idx,"sequence"]),"\n")
+        #         cat("SPIKE!","at",raw[idx,"gpos"],"in",alleles[j,"geneName"],alleles[j,"location"],"sequence",as.character(raw[idx,"sequence"]),"\n")
         regions[nrow(regions)+1,] <- c(alleles[j,"geneName"],coords[1],coords[2],as.character(raw[idx,"sequence"]))
       }      
     } 
-#     else {
-#       cat("SPIKE!","at",raw[idx,"gpos"],"not in a gene...\n")
-#     }
+    #     else {
+    #       cat("SPIKE!","at",raw[idx,"gpos"],"not in a gene...\n")
+    #     }
   }
 }
 regions$x1 <- as.integer(regions$x1)
 regions$x2 <- as.integer(regions$x2)
 regions$sequence <- as.factor(regions$sequence)
 
-  
+
 GG <- GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.1,label=rName,angle=45)) + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.05, ymax = -0.01), fill = "black")
 ### whether we save or display the plot depends on whether it is being called as a script or not!
 if (interactive()) {
   GG
 } else {
-  ggsave(filename = argv$pdf, plot = GG, scale = 1, width = 15, height = 8, units = "in", dpi = 300)
-  cat("script finished\n")
+  ggsave(filename=paste(argv$prefix,".SAS.genome.pdf",sep=""), plot = GG, scale = 1, width = 15, height = 8, units = "in", dpi = 300)
+  cat("allele plotting along genome finished successfully\n")
 }
 
 
 
-
+###### ordered on allele frequency --> can we see any levels?
+if (argv$levels && nrow(raw)>50) {
+  newdata <- raw[order(raw$frac),]
+  newdata$neworder <- 0
+  h <- hash(levels(newdata$sequence),rep(0,length(levels(newdata$sequence))))
+  for (idx in seq(1,nrow(newdata))) {
+    seqName <- as.character(newdata[idx,"sequence"])
+    h[[ seqName ]] <- h[[ seqName ]] + 1
+    newdata[idx,"neworder"] <- h[[ seqName ]]                                    
+  }
+  GG2 <- ggplot(data=newdata,aes(x=neworder, y=frac,colour=mutation)) + geom_point() + facet_wrap(~sequence, scales="fixed", ncol=1)
+  
+  if (interactive()) {
+    GG2
+  } else {
+    ggsave(filename=paste(argv$prefix,".SAS.levels.pdf",sep=""), plot = GG2, scale = 1, width = 15, height = 8, units = "in", dpi = 300)
+    cat("alleles ordered by frequency finished successfully\n")
+  }
+  
+}
 
 
 

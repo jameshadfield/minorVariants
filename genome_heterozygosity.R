@@ -20,7 +20,7 @@ p <- add.argument(p, "--prefix", help="prefix for output")
 p <- add.argument(p, "--levels", help="[FLAG] display potential levels", flag=TRUE)
 
 if (interactive()) {
-  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/F_STN15.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/","--levels"));
+  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/D_NL17.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/","--levels"));
 } else {
   argv <- parse.args(p, argv = commandArgs(trailingOnly = TRUE))
 }
@@ -57,6 +57,7 @@ makeAlleleMinor <- function(x) {
 raw$frac <- apply(raw,1,makeAlleleMinor)
 epsilon <- 0.01  ## 1%
 raw <- subset(raw,frac>=epsilon)
+if (nrow(raw)==0) stop("No plotting as there are *no* segregating alleles in the whole genome!")
 # for (idx in seq(1,nrow(newdata))) { if (newdata[idx,"frac"]>0.5) {newdata[idx,"frac"] <- 1 - newdata[idx,"frac"] }  } ## slow
 GG <- ggplot(data=raw,aes(x=gpos, y=frac)) + geom_point(size=2,aes(colour=mutation))
 GG <- GG + facet_wrap(~sequence, scales="fixed", ncol=1)

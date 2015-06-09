@@ -18,9 +18,10 @@ p <- add.argument(p, "--ref", help="reference tab file (contains genes)")
 p <- add.argument(p, "--wd", help="working directory", default=".")
 p <- add.argument(p, "--prefix", help="prefix for output")
 p <- add.argument(p, "--levels", help="[FLAG] display potential levels", flag=TRUE)
+p <- add.argument(p, "--meta", help="additional metadata file")
 
 if (interactive()) {
-  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/D_NL17.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/","--levels"));
+  argv <- parse.args(p, c("--seq", "./allCTGDmpileups/L1_L942.genes.tab","--ref","./het_ref/mutant.v3.tab","--wd","~/Desktop/","--levels","--meta","./het_ref/additional_metadata.tab"));
 } else {
   argv <- parse.args(p, argv = commandArgs(trailingOnly = TRUE))
 }
@@ -35,9 +36,14 @@ alleles <- alleles[ ! grepl("^#",alleles[,1],), ]
 alleles$offset <- 0
 for (idx in seq(1:nrow(alleles))) { alleles[idx,"offset"] <- min(as.numeric(unlist(regmatches(alleles[idx,"location"], gregexpr("[0-9]+", alleles[idx,"location"], perl=TRUE))))) }
 
+
+
+
 raw <- read.table(argv$seq,header=T,sep="\t",comment.char='', stringsAsFactors=F)
 raw$sequence <- factor(raw$sequence)
 raw$position <- as.integer(raw$position)
+mean.depth <- mean(subset(raw,mutation=="depth")$frac)
+num.SNPs <- nrow(subset(raw,mutation=="fixed" & frac>=0.8))
 raw <- subset(subset(raw,mutation!="WT"),mutation!="depth")
 raw$gpos <- 0
 h <- hash(alleles[,"geneName"],alleles[,"offset"])
@@ -45,6 +51,15 @@ raw$gpos <- apply(raw,1,function(x) h[[ x[[2]] ]] )
 raw$gpos <- raw$gpos+raw$position
 # for (idx in seq(1:nrow(raw))) { cat(idx,"\t"); raw[idx,"gpos"] <- raw[idx,"position"] + min(alleles[alleles$geneName==raw[idx,"name"],"offset"] )} ### slooow
 # for (idx in seq(1:nrow(raw))) { cat(idx,"\t"); raw[idx,"gpos"] <- raw[idx,"position"] + h[[ raw[idx,"name"] ]] }
+
+#### ADDITIONAL METADATA #####
+metastring <- ""
+if ( ! is.na(argv$meta) ) {
+  meta <- read.table(argv$meta,header=F,sep="\t",comment.char='', stringsAsFactors=F)
+  if ( length(levels(raw$sequence))==1 ) {
+    metastring <- meta[meta[,1]==levels(raw$sequence)[[1]],2]
+  }
+}
 
 ### plotting the alleles frequencies across the chromosome to see any enriched areas
 #   (geom_point as geom_bar is too sparse!)
@@ -61,8 +76,11 @@ if (nrow(raw)==0) stop("No plotting as there are *no* segregating alleles in the
 # for (idx in seq(1,nrow(newdata))) { if (newdata[idx,"frac"]>0.5) {newdata[idx,"frac"] <- 1 - newdata[idx,"frac"] }  } ## slow
 GG <- ggplot(data=raw,aes(x=gpos, y=frac)) + geom_point(size=2,aes(colour=mutation))
 GG <- GG + facet_wrap(~sequence, scales="fixed", ncol=1)
-GG <- GG + coord_cartesian(xlim=c(0,max(c(alleles$offset,raw$gpos))))
-
+GG <- GG + coord_cartesian(xlim=c(0,max(c(alleles$offset,raw$gpos))), ylim=c(0,0.5))
+### the following annotate call should be replaced by a custom data.frame and a call to geom_text to allow faceting
+annstring <- paste("Mean coverage: ",as.integer(mean.depth),"\nNum called SNPs: ",num.SNPs,"\nNum het sites: ",nrow(raw),"\n",metastring,sep="")
+GG <-  GG + annotate("text",y=0.49,x=10000,hjust=0,vjust=1,label=annstring)
+GG
 ##### from the manhatten-like plot, we want all the "spikes" a.k.a. collections of points over some value to have their corresponding gene displayed...
 spike_threshold <- 0.25
 regions <- data.frame(rName=character(),x1=integer(),x2=integer(),sequence=character(),stringsAsFactors=FALSE)

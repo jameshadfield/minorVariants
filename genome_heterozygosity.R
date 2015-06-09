@@ -76,7 +76,7 @@ if (nrow(raw)==0) stop("No plotting as there are *no* segregating alleles in the
 # for (idx in seq(1,nrow(newdata))) { if (newdata[idx,"frac"]>0.5) {newdata[idx,"frac"] <- 1 - newdata[idx,"frac"] }  } ## slow
 GG <- ggplot(data=raw,aes(x=gpos, y=frac)) + geom_point(size=2,aes(colour=mutation))
 GG <- GG + facet_wrap(~sequence, scales="fixed", ncol=1)
-GG <- GG + coord_cartesian(xlim=c(0,max(c(alleles$offset,raw$gpos))), ylim=c(0,0.5))
+GG <- GG + coord_cartesian(xlim=c(0,max(c(alleles$offset,raw$gpos))), ylim=c(-0.1,0.5))
 ### the following annotate call should be replaced by a custom data.frame and a call to geom_text to allow faceting
 annstring <- paste("Mean coverage: ",as.integer(mean.depth),"\nNum called SNPs: ",num.SNPs,"\nNum het sites: ",nrow(raw),"\n",metastring,sep="")
 GG <-  GG + annotate("text",y=0.49,x=10000,hjust=0,vjust=1,label=annstring)
@@ -128,7 +128,7 @@ regions$x2 <- as.integer(regions$x2)
 regions$sequence <- as.factor(regions$sequence)
 
 
-GG <- GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.1,label=rName,angle=45)) + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.05, ymax = -0.01), fill = "black")
+GG <- GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.05,vjust=1,label=rName,angle=45)) + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.03, ymax = 0, vjust=0), fill = "black")
 ### whether we save or display the plot depends on whether it is being called as a script or not!
 if (interactive()) {
   GG

@@ -559,10 +559,8 @@ if __name__ == "__main__":
 	if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
 
 	## parse the BAM file
-	seqcount=0
 	bam = BAM(infiles['bam'])
-	seqcount+=1
-	print "[progress-update] sequence {}: {}".format(seqcount,fname)
+	print "[progress-update] loaded bam file"
 	sys.stdout.flush()
 
 	for allele in alleles:

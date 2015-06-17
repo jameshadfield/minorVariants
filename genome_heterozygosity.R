@@ -124,7 +124,7 @@ for (idx in seq(1,nrow(raw.sas))) { # each sas variant
   if (raw.sas[idx,"frac"]>spike_threshold) {
     j <- IterBinSearch(alleles,raw.sas[idx,"gpos"]) # what gene this point is "in" using binary search
     if (! is.null(j)) {
-      cat("peak in ",alleles[j,"geneName"],"\n")
+#       cat("peak in ",alleles[j,"geneName"],"\n")
       if (! alleles[j,"geneName"] %in% regions[,"rName"]) { # has this gene already been "found"? 
         coords <- as.integer(unlist(regmatches(alleles[j,"location"], gregexpr("[0-9]+", alleles[j,"location"], perl=TRUE))))
         regions[nrow(regions)+1,]  <- c(alleles[j,"geneName"],coords[1],coords[2])
@@ -161,7 +161,7 @@ GG <- GG + geom_line(data=cov.df,aes(x=x,y=y))
 if (interactive()) {
   GG
 } else {
-  ggsave(filename=paste(argv$prefix,".SAS.genome.pdf",sep=""), plot = GG, scale = 1, width = 15, height = 8, units = "in", dpi = 300)
+  ggsave(filename=paste(argv$prefix,".SAS.genome.pdf",sep=""), plot = GG, scale = 1, width = 18, height = 12, units = "in", dpi = 300)
   cat("allele plotting along genome finished successfully\n")
 }
 

@@ -18,7 +18,7 @@ def get_user_options():
 	# parser.description='gurat version 2.1'
 	parser.epilog="..."
 	parser.add_argument('-t', "--tabfile", required=True, action='store', dest="tabfile", help="tabfile of genomic regions/positions of interest [REQUIRED]", default="", metavar="FILE")
-	parser.add_argument("-b", "--bcfdir", action="store", dest="bcfdir", help="directory with either bam files *or* SMALT folders [default: current directory]", default=".", metavar="PATH")
+	parser.add_argument("-b", "--bamfile", action="store", dest="bamfile", help="path to a bam file", default=".", metavar="PATH")
 	parser.add_argument("-f", "--fasta", required=True, action="store", dest="fasta", help="reference fasta sequence [REQUIRED]", default=".", metavar="FILE")
 	parser.add_argument("-p", "--prefix", required=True, action="store", dest="prefix", help="prefix for output files [REQUIRED]", default=".", metavar="STRING")
 	parser.add_argument("--noplot", required=False, action="store_false", dest="plot", help="do not attempt to plot anything", default=True)
@@ -178,7 +178,7 @@ class Sanger(object):
 	def revcomp(self,dnastr):
 		return "".join([self.RC[x] for x in list(dnastr)[::-1]])
 
-### BASE CLASS WHICH ALLELE AND GENE INHERIT.
+### CLASS. (allele and gene are objects of this class created by parse_tabfile)
 class Variation(object):
 	"""to write"""
 
@@ -196,13 +196,12 @@ class Variation(object):
 			self.ALT = alleles[1]
 			self.posInGene= pos
 
-
 	def set_pileup_counts(self,bamobj):
 		"""this method sends a list of tuples (baseList) for pileup to act upon (bamobj.pileup)
 		filtering is done by (bamobj.pileup)
 		the results are stored in this object as self.pileup which is dict of DNA/CODON -> count
 		if amino acid(s) then another object self.aapileup is generated which is dict of AA->count
-		if this is a gene, the consensus seq could be pieced together via
+		if this were a gene, the consensus seq could be pieced together via
 		"".join([ max(x.iterkeys(), key=(lamda key: x[key])) for x in self.aapileup ])
 		"""
 
@@ -303,7 +302,6 @@ class Variation(object):
 				elif allele.ttype == 'dna':
 					self.resistanceAlleles[allele.posInGene] = allele ## this seems dangerous
 
-
 	def check_against_ref(self,records,sanger):
 		#refseq should be Bio.SeqIO.parse() dict
 		# refseq has zero-based co-ord system (like a bam file)
@@ -369,7 +367,7 @@ class Variation(object):
 						print "[warning] Gene {} position {} has a {} but the resistance WT allele at this position is {}".format(self.genename, idx+1, refBSE, self.resistanceAlleles[idx+1].WT)
 				self.dnaseq.append(refBASE)
 
-### WRAPPER FOR SAMTOOLS. IMPLEMENTS FILTERING.
+### WRAPPER FOR SAMTOOLS (calls pysam) IMPLEMENTS FILTERING.
 class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 	"""don't forget: bamfiles are zero-base
 	this class should/could potentially be a closure function
@@ -499,21 +497,6 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		# print "return time. ret: {}".format(ret)
 		return ret
 
-## FN TO RETURN ALL BAM FILES IN SCOPE
-def parse_bcf_bam_files(cwd):
-	filepaths = glob(cwd+"/*bam")
-	filepaths.extend(glob(cwd+"/*SMALT/*bam"))
-	# files = [f for f in files if not 'variant' in f]
-	files = {}
-	for p in filepaths:
-		files[os.path.basename(p).split('.bam')[0]] = {'bam':p}
-
-	print "[progress-update] found {} bam files".format(len(files.keys()))
-	if len(files.keys())==0:
-		print "[error] no bam files found!!!"
-		sys.exit(1)
-	return files
-
 ## CALL RSCRIPT (given a call array)
 def call_R(tabfile, savename, geneName=False, numCol=1, yMax=1, log=False):
 	#  plot minor variants expects the following arguments:
@@ -554,7 +537,7 @@ if __name__ == "__main__":
 	options = get_user_options()
 	fnull = open(os.devnull, "w")
 	## TODO: sanity check options
-	files = parse_bcf_bam_files(options.bcfdir)
+	infiles = {'bam':options.bamfile}
 
 	alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
 
@@ -575,26 +558,24 @@ if __name__ == "__main__":
 	if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
 	if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
 
-	## parse the BAM files one by one (logically this seems the most efficient)
+	## parse the BAM file
 	seqcount=0
-	for fname in files:
-		# bcf = BCF(f)
-		bam = BAM(files[fname]['bam'])
-		seqcount+=1
-		print "[progress-update] sequence {}: {}".format(seqcount,fname)
+	bam = BAM(infiles['bam'])
+	seqcount+=1
+	print "[progress-update] sequence {}: {}".format(seqcount,fname)
+	sys.stdout.flush()
+
+	for allele in alleles:
+		print "[progress-update] checking allele {} in gene {}".format(allele.name,allele.genename)
 		sys.stdout.flush()
+		allele.set_pileup_counts(bam) ## sets allele.pileup and maybe allele.aapileup
+		allele.interpret(writeRalleles) ## does not store data, passes it to writeRalleles
 
-		for allele in alleles:
-			print "[progress-update] checking allele {} in gene {}".format(allele.name,allele.genename)
-			sys.stdout.flush()
-			allele.set_pileup_counts(bam) ## sets allele.pileup and maybe allele.aapileup
-			allele.interpret(writeRalleles) ## does not store data, passes it to writeRalleles
-
-		for gene in genes:
-			print "[progress-update] calculating variation in {} {} sequence {}".format(gene.ttype, gene.genename,fname)
-			sys.stdout.flush()
-			gene.set_pileup_counts(bam)
-			gene.interpret(writeRgenes)
+	for gene in genes:
+		print "[progress-update] calculating variation in {} {} sequence {}".format(gene.ttype, gene.genename,fname)
+		sys.stdout.flush()
+		gene.set_pileup_counts(bam)
+		gene.interpret(writeRgenes)
 
 	if genes:   writeRgenes(close=1)
 	if alleles: writeRalleles(close=1)

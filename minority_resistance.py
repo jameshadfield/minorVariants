@@ -11,6 +11,7 @@ import argparse
 from Bio import SeqIO
 import pysam
 import pytest
+import bzip
 
 ### PARSE OPTIONS ###
 def get_user_options():
@@ -22,6 +23,7 @@ def get_user_options():
 	parser.add_argument("-f", "--fasta", required=True, action="store", dest="fasta", help="reference fasta sequence [REQUIRED]", default=".", metavar="FILE")
 	parser.add_argument("-p", "--prefix", required=True, action="store", dest="prefix", help="prefix for output files [REQUIRED]", default=".", metavar="STRING")
 	parser.add_argument("--noplot", required=False, action="store_false", dest="plot", help="do not attempt to plot anything", default=True)
+	parser.add_argument("--guessAA-DNA", required=False, action="store_true", dest="guessAA", help="try to guess if a gene is AA rather than DNA (default)", default=False)
 
 	return parser.parse_args()
 
@@ -81,6 +83,9 @@ def parse_tabfile(tabfile,sanger):
 
 				## now, how we proceed depends on whether it's amino acids / base information
 				##	order tried: base in genome // base in gene // amino acid in gene
+
+				##### edit: only dealing with DNA genes for the time being
+
 				try:
 					baseList = [( int(fields[5]) , )]
 					posInGene = False
@@ -117,7 +122,14 @@ def parse_tabfile(tabfile,sanger):
 							else:
 								baseList = [tuple([ genebase1 - 1 + x for x in genebasepos ])]
 						except ValueError: ## three dashes mean analyse the entire gene... but is it DNA or AA we want?
-							if 'DNA' in name.upper() or 'RNA' in name.upper():
+							if not options.guessAA:
+								ttype='dnagene'
+								if rev:
+									baseList = [(x,) for x in range(genebase1,geneendbase-1,-1)]
+								else:
+									baseList = [(x,) for x in range(genebase1,geneendbase+1, 1)]
+
+							elif ('DNA' in name.upper() or 'RNA' in name.upper()):
 								ttype='dnagene'
 								if rev:
 									baseList = [(x,) for x in range(genebase1,geneendbase-1,-1)]
@@ -224,7 +236,7 @@ class Variation(object):
 						res[AA] = value
 				self.aapileup.append(res)
 
-	def interpret(self,writeR):
+	def interpret(self,outFH):
 		"""for each item in the pileup (which will be either one base pos, one allele or many alleles)
 		we assign fractions
 		and classify them as: WT, OTHER, ALT, SWEEP (SWEEP is OTHER if frac(OTHER)>0.8)
@@ -236,59 +248,94 @@ class Variation(object):
 		if self.ttype in ['dna','dnagene']:
 			pileup=self.pileup
 		elif self.ttype in ['aa','aagene']:
+			print "needs fixing for amino acids!!!!"
+			sys.exit()
 			pileup=self.aapileup
 
-		for idx,item in enumerate(pileup): ## this goes through the bases or amino acid POSITIONS analysed (only one item for a AA / DNA mutation)
+		purines = ['A','G']
+		pyramidines = ['C','T']
+		AT,GC=['A','T'],['G','C']
+
+
+		for idx,item in enumerate(pileup): ## this goes through the bases of a dnagene
 			# check if we got any results here (that passed filtering remember...)
 			if not len(item):
 				print '[warning] possible mapping failure'
 				continue
+			refBase = self.dnaseq[idx]
+			data = {'WT':0,'ALT':0,'AT>TA':0,'AT>CG':0,'GC>CG':0,'GC>TA':0,'AT>GC':0,'GC>AT':0,'depth':sum(item.values())}
 
-			# print "REF @ base {} has {}".format(idx+1,self.aaseq[idx])
-			# pprint(item)
-
-			data = {'WT':0,'ALT':0,'OTHER':0,'SWEEP':0}
-			cov = sum(item.values()) #remember, this has already been filtered and corresponds to the *gene* not the *ref*
-
-			for base_or_codon,depth in item.items():
-				### wwhat's normal / ALT?
-				try:
-					WT,ALT,posInGene = self.WT, self.ALT, self.posInGene
-				except AttributeError: ## it's a gene --> self.X hasn't been set
-					posInGene = idx+1
-					WT = self.aaseq[idx] if self.ttype=='aagene' else self.dnaseq[idx]
-					try: ## has a variant been associated??
-						ALT = self.resistanceAlleles[posInGene].ALT
-					except KeyError:
-						ALT = []
-				depthfrac = float(depth) / cov
-				if base_or_codon in WT:
-					data['WT'] += depthfrac
-				else: ## ohh, how exciting!
-					mutation="{}{}{}".format("/".join(WT),posInGene,base_or_codon)
-					if base_or_codon in ALT:
-						data['ALT'] += depthfrac
-						nstr = " ** PUBLISHED MUTATION ** "
-					elif depthfrac > 0.8:
-						data['SWEEP'] += depthfrac
-						nstr = " ** SWEEP ** "
+			# now we iterate through the pileup at this base!
+			if self.ttype is 'dnagene':
+				for base,depth in item.items():
+					depthfrac = float(depth) / data['depth']
+					if base == refBase:
+						data['WT'] += depthfrac
 					else:
-						data['OTHER'] += depthfrac
-						nstr=''
-					if not self.ttype in ['dnagene','aagene']: ## surpress output for gene
-						print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
+						data['ALT'] += depthfrac
+						if refBase in AT:
+							if base in AT:
+								data['AT>TA']+=depthfrac
+							elif base in purines and refBase in purines:
+								# transition
+								data['AT>GC']+=depthfrac
+							else: # transversion
+								data['AT>CG']+=depthfrac
+						else: #refBase is in GC
+							if base in GC:
+								data['GC>CG']+=depthfrac
+							elif base in purines and refBase in purines:
+								# transition
+								data['GC>AT']+=depthfrac
+							else: # transversion
+								data['GC>TA']+=depthfrac
+				## data has now been filled out
+				# samplename genename geneposition WT,'ALT','AT>TA','AT>CG','GC>CG','GC>TA','AT>GC','GC>AT','depth'
+				outFH.write("{}\t{}\t{}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{}\n".format(samplename,self.genename,idx+1,data['WT'],data['ALT'],data['AT>TA'],data['AT>CG'],data['GC>CG'],data['GC>TA'],data['AT>GC'],data['GC>AT'],data['depth']))
 
-			## write to R tab file via a writer fn which uses **kwargs
-			nameMap = {'WT':'WT','ALT':'published','OTHER':'other','SWEEP':'fixed'}
-			namestr = self.genename
-			pos     = posInGene
-			# namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype in ['dnagene','aagene'] else self.name
-			# write the depth information for everything (easy to filter out at plotting time)
-			writeR(file=fname, name=namestr, pos=pos, mutation='depth', frac=sum(item.values()))
-			if self.ttype in ['dnagene','aagene'] or data['ALT'] + data['OTHER'] > 0:
-				for mutationType,value in data.items():
-					if value > 0:
-						writeR(file=fname, name=namestr, pos=pos, mutation=nameMap[mutationType], frac=value)
+
+			else:
+				print "OLD VERSION. NEEDS WORK."
+				sys.exit()
+				for base_or_codon,depth in item.items():
+					### wwhat's normal / ALT?
+					try:
+						WT,ALT,posInGene = self.WT, self.ALT, self.posInGene
+					except AttributeError: ## it's a gene --> self.X hasn't been set
+						posInGene = idx+1
+						# WT = self.aaseq[idx] if self.ttype=='aagene' else self.dnaseq[idx]
+						try: ## has a variant been associated??
+							ALT = self.resistanceAlleles[posInGene].ALT
+						except KeyError:
+							ALT = []
+					depthfrac = float(depth) / cov
+					if base_or_codon in WT:
+						data['WT'] += depthfrac
+					else: ## ohh, how exciting!
+						mutation="{}{}{}".format("/".join(WT),posInGene,base_or_codon)
+						if base_or_codon in ALT:
+							data['ALT'] += depthfrac
+							nstr = " ** PUBLISHED MUTATION ** "
+						elif depthfrac > 0.8:
+							data['SWEEP'] += depthfrac
+							nstr = " ** SWEEP ** "
+						else:
+							data['OTHER'] += depthfrac
+							nstr=''
+						if not self.ttype in ['dnagene','aagene']: ## surpress output for gene
+							print '[result]{} {} variation in {} ({}) detected at {}x depth ({:.1%})'.format(nstr,mutation,self.genename,self.drug,depth,depthfrac)
+
+				## write to R tab file via a writer fn which uses **kwargs
+				nameMap = {'WT':'WT','ALT':'published','OTHER':'other','SWEEP':'fixed'}
+				namestr = self.genename
+				pos     = posInGene
+				# namestr = "{}_{:0>4d}".format(self.genename, posInGene) if self.ttype in ['dnagene','aagene'] else self.name
+				# write the depth information for everything (easy to filter out at plotting time)
+				writeR(file=fname, name=namestr, pos=pos, mutation='depth', frac=sum(item.values()))
+				if self.ttype in ['dnagene','aagene'] or data['ALT'] + data['OTHER'] > 0:
+					for mutationType,value in data.items():
+						if value > 0:
+							writeR(file=fname, name=namestr, pos=pos, mutation=nameMap[mutationType], frac=value)
 
 
 			## here's where we could store the values if desired (e.g. setter fn)
@@ -538,6 +585,7 @@ if __name__ == "__main__":
 	fnull = open(os.devnull, "w")
 	## TODO: sanity check options
 	infiles = {'bam':options.bamfile}
+	samplename = infiles['bam'].split('/')[-1].split('.bam')[0]
 
 	alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
 
@@ -555,8 +603,10 @@ if __name__ == "__main__":
 			gene.set_ref_info(records,sanger)
 
 	## OPEN OUTPUT FILE HANDLES
-	if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
-	if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
+	# if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
+	# if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
+
+	outFH = gzip.open(options.prefix+".genes.tab",'wt')
 
 	## parse the BAM file
 	bam = BAM(infiles['bam'])
@@ -570,13 +620,14 @@ if __name__ == "__main__":
 		allele.interpret(writeRalleles) ## does not store data, passes it to writeRalleles
 
 	for gene in genes:
-		print "[progress-update] calculating variation in {} {} sequence {}".format(gene.ttype, gene.genename,fname)
+		# if gene.name != "tsf": continue
+		print "[progress-update] calculating variation in {} {}".format(gene.ttype, gene.genename)
 		sys.stdout.flush()
 		gene.set_pileup_counts(bam)
-		gene.interpret(writeRgenes)
+		gene.interpret(outFH)
 
-	if genes:   writeRgenes(close=1)
-	if alleles: writeRalleles(close=1)
+	# if genes:   writeRgenes(close=1)
+	# if alleles: writeRalleles(close=1)
 
 	## CALL R ####
 	if options.plot:

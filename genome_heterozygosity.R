@@ -96,8 +96,32 @@ if ( ! is.na(argv$meta) ) {
   rm(tmp)
 }
 
+<<<<<<< HEAD
 ####### in raw.sas we have a number of "peaks" in the manhatten plot. Identify which genes these are in
 ####### and save this information into the regions data.frame
+=======
+### plotting the alleles frequencies across the chromosome to see any enriched areas
+#   (geom_point as geom_bar is too sparse!)
+#   the gene names e.t.c. are shown too (maybe intelligently?)
+makeAlleleMinor <- function(x) {
+  #   x == sequence   name position mutation   frac gpos
+  if (x[[5]]>0.5) 1 - as.numeric(x[[5]])
+  else as.numeric(x[[5]])
+}
+raw$frac <- apply(raw,1,makeAlleleMinor)
+epsilon <- 0.01  ## 1%
+raw <- subset(raw,frac>=epsilon)
+if (nrow(raw)==0) stop("No plotting as there are *no* segregating alleles in the whole genome!")
+# for (idx in seq(1,nrow(newdata))) { if (newdata[idx,"frac"]>0.5) {newdata[idx,"frac"] <- 1 - newdata[idx,"frac"] }  } ## slow
+GG <- ggplot(data=raw,aes(x=gpos, y=frac)) + geom_point(size=2,aes(colour=mutation))
+GG <- GG + facet_wrap(~sequence, scales="fixed", ncol=1)
+GG <- GG + coord_cartesian(xlim=c(0,max(c(alleles$offset,raw$gpos))), ylim=c(-0.1,0.5))
+### the following annotate call should be replaced by a custom data.frame and a call to geom_text to allow faceting
+annstring <- paste("Mean coverage: ",as.integer(mean.depth),"\nNum called SNPs: ",num.SNPs,"\nNum het sites: ",nrow(raw),"\n",metastring,sep="")
+GG <-  GG + annotate("text",y=0.49,x=10000,hjust=0,vjust=1,label=annstring)
+GG
+##### from the manhatten-like plot, we want all the "spikes" a.k.a. collections of points over some value to have their corresponding gene displayed...
+>>>>>>> f2a59d59f19e9f05af47d24e9cce2608d881c48f
 spike_threshold <- 0.25
 regions <- data.frame(rName=character(),x1=integer(),x2=integer(),stringsAsFactors=FALSE)
 IterBinSearch <- function(A, value) {
@@ -157,6 +181,10 @@ GG <- GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.05,vjust=1,label=rName
 GG <- GG + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.03, ymax = 0, vjust=0), fill = "black")
 GG <- GG + geom_line(data=cov.df,aes(x=x,y=y))
 
+<<<<<<< HEAD
+=======
+GG <- GG + geom_text(data=regions,aes(x=x1+(x2-x1)/2,y=-0.05,vjust=1,label=rName,angle=45)) + geom_rect(data=regions, aes(x=x1, y=0, xmin = x1, xmax = x2, ymin = -0.03, ymax = 0, vjust=0), fill = "black")
+>>>>>>> f2a59d59f19e9f05af47d24e9cce2608d881c48f
 ### whether we save or display the plot depends on whether it is being called as a script or not!
 if (interactive()) {
   GG

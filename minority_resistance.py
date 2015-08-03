@@ -43,167 +43,68 @@ def set_up_genome_analysis(records):
 	## we should be smart and make a bunch of objects, each max 100kb, to save memory when running!
 
 	#				 ttype,  name,chrom,baseList,rev,name)
-	return [Variation("genome","some-name",chromName,baseList,False)]
+	return [Variation("genome","some-name",chromName,baseList,False,False)]
 
-# ### DEAL WITH THE TABFILE ###
-# def parse_tabfile(tabfile,sanger):
-# 	""" tabfile must have format of:
-# 	type	chromosome (in BAM file) location	name	WT	PRI
-# 	the first three are essential
-# 	location can be of the following forms:
-# 		x..y:z
-# 		c(x..y):z
-# 		x..y
-# 		c(x..y)
-# 	where z is the relative amino acid or base inside that gene
-# 	PRI is the published / a-priori mutation we are looking for
+### DEAL WITH THE TABFILE ###
+def parse_tabfile(tabfile,sanger):
+	"""
+	tabfile is really simple
+	4 fields seperated by whitespace
+	(0) name -- any string without whitespace
+	(1) position: chromosome:geneStart..geneEnd:posInGen
+				  chromosome:c(geneStart..geneEnd):posInGen
+				  chromosome:geneName:posInGen
+				  chromosome:posInGen
+			* if geneStart..geneEnd is missing then it's assumed to be WRT the chrom
+			* geneName is searched from some annotation (TO DO)
+			* if posInGene missing then analyse the entire gene
+	(2) aa|dna: put default: DNA, aa|AA -> look at codon
+	(3) WT,ALT
+		* base | codon. if ALT is missing then that's ok
 
-# 	RETURNS:
-# 	list of variation objects representing alleles or genes.
-# 	note that:
-# 		chrpos = list of tuples of positions relative to the chromosome. Order forms the codon(s)!
-# 	         e.g. would be [(83,)] for base 83 or [(83,82,81)] for AA starting at base 83 on the - strand
-# 		all aa / dna values are given relative to the gene (they are never complemented onto the plus strand, say)
-# 	"""
-# 	# class ParseError(Exception):
-# 	# 	pass
+	RETURNS:
+	list of variation objects representing alleles or genes.
+	note that:
+		chrpos = list of tuples of positions relative to the chromosome. Order forms the codon(s)!
+	         e.g. would be [(83,)] for base 83 or [(83,82,81)] for AA starting at base 83 on the - strand
+		all aa / dna values are given relative to the gene (they are never complemented onto the plus strand, say)
+	"""
+	listOfAlleleObjs, listOfGeneObjs = [], []
+	class ParseError(Exception):
+		pass
+	with open(tabfile,'rU') as fh:
+		for line in fh:
+			try:
+				if line.startswith('#') or not line.strip():
+					continue
+				fields = line.split() ## any whitespace will do
+				if len(fields)!=4:
+					raise ParseError("Too many fields",line)
+				posFields = str(fields[1]).split(':')
+				if len(posFields)!=2:
+					raise ParseError("3 field position not coded yet",line)
+				chromName = posFields[0]
+				try:
+					posInGene = int(posFields[-1])
+				except ValueError:
+					# here's where it could be a gene name! (if len(posFields)==2)
+					raise ParseError("No position in gene number given",line)
+				if 'AA' in fields[2].upper():
+					raise ParseError("AA not coded yet", line)
+				ttype = 'dna'
+				rev = False
+				baseList = [( posInGene , )]
+				if ttype in ['dna','aa']:
+					try:
+						newObj = Variation(ttype,fields[0],chromName,baseList,rev,fields[3].split(','))
+					except AssertionError:
+						raise ParseError("Object creation failed",line)
+					else:
+						listOfAlleleObjs.append(newObj)
+			except ParseError as e:
+				print "[tabfile-parsing-error] {}. Line {}".format(e.args[0],e.args[1])
 
-# 	# def check_if_legit(ttype,listOfTuples,line):
-# 	# 	for tple in listOfTuples:
-# 	# 		for x in tple:
-# 	# 			if ttype=='dna' and x not in sanger.dna:
-# 	# 				raise ParseError("alleles are not valid DNA bases",line)
-# 	# 			elif ttype=='aa' and x!='X' and x not in sanger.aa2codon.keys():
-# 	# 				raise ParseError("alleles are not valid Amino Acids",line)
-
-
-
-# 	with open(tabfile,'rU') as fh:
-
-
-
-# 	listOfAlleleObjs, listOfGeneObjs = [], []
-# 	seenGeneNames = []
-
-# 	with open(tabfile,'rU') as fh:
-# 		# line format: geneName - chr - coords - amino-acid - baseInGene - baseInGenome -- WT -- ALT --name -- drug
-# 		#					0		1	2			3				4		  5     		6	7		8		9
-# 		for line in fh:
-# 			try:
-# 				if line.startswith('#') or not line.strip():
-# 					continue
-# 				# print "***** bACK TO START"
-# 				fields = line.split() ## any whitespace will do
-# 				# pprint(fields)
-
-# 				## extract the *essential* string information ##
-# 				try:
-# 					genename = str(fields[0])
-# 					chrom = str(fields[1])
-# 					drug = str(fields[9])
-# 					name = str(fields[8])
-# 				except IndexError:
-# 					raise ParseError("Failed to parse genename / chromosome / e.t.c. (ensure dashes if missing data) [skipping] ",line)
-# 				# and the non-essential strings
-# 				if drug=='-':
-# 					drug=""
-# 				if name=='-':
-# 					name=genename
-
-# 				## now, how we proceed depends on whether it's amino acids / base information
-# 				##	order tried: base in genome // base in gene // amino acid in gene
-
-# 				##### edit: only dealing with DNA genes for the time being
-
-# 				try:
-# 					baseList = [( int(fields[5]) , )]
-# 					posInGene = False
-# 					ttype='dna'
-# 				except ValueError: ## OK. try to parse gene co-ords and an offset
-# 					# get genome position of base 1 in the gene
-# 					try:
-# 						if fields[2].startswith('c'):
-# 							coords = fields[2].split('(')[1].split(')')[0].split('..')
-# 							rev,genebase1,geneendbase = True,max(int(coords[1]),int(coords[0])),min(int(coords[1]),int(coords[0]))
-# 						else:
-# 							coords = fields[2].split('..')
-# 							if int(coords[0]) <= int(coords[1]):
-# 								rev,genebase1,geneendbase = False,int(coords[0]),int(coords[1])
-# 							else:
-# 								rev,genebase1,geneendbase = True,int(coords[1]),int(coords[0])
-# 					except ValueError:
-# 						raise ParseError("Failed to parse the gene co-ordinates [skipping] ",line)
-
-# 					try: ## assume it's given as gene base:
-# 						posInGene = int(fields[4])
-# 						ttype='dna'
-# 						if rev:
-# 							baseList = [( genebase1 + 1 - posInGene , )]
-# 						else:
-# 							baseList = [( genebase1 - 1 + posInGene , )]
-# 					except ValueError: ## it wasn't a base in the gene, maybe it's AA?
-# 						try:
-# 							posInGene = int(fields[3])
-# 							ttype='aa'
-# 							genebasepos = tuple([ (posInGene-1) * 3 + x for x in (1,2,3) ])
-# 							if rev:
-# 								baseList = [tuple([ genebase1 + 1 - x for x in genebasepos ])] ## order forms the codon. important
-# 							else:
-# 								baseList = [tuple([ genebase1 - 1 + x for x in genebasepos ])]
-# 						except ValueError: ## three dashes mean analyse the entire gene... but is it DNA or AA we want?
-# 							if not options.guessAA:
-# 								ttype='dnagene'
-# 								if rev:
-# 									baseList = [(x,) for x in range(genebase1,geneendbase-1,-1)]
-# 								else:
-# 									baseList = [(x,) for x in range(genebase1,geneendbase+1, 1)]
-
-# 							elif ('DNA' in name.upper() or 'RNA' in name.upper()):
-# 								ttype='dnagene'
-# 								if rev:
-# 									baseList = [(x,) for x in range(genebase1,geneendbase-1,-1)]
-# 								else:
-# 									baseList = [(x,) for x in range(genebase1,geneendbase+1, 1)]
-# 							else: ## AA is the default
-# 								ttype='aagene'
-# 								if (abs(genebase1 - geneendbase) + 1) % 3:
-# 									raise ParseError("Length of gene {} ({}) is not a multiple of 3. Skipping.",genename,fields[2])
-# 								if rev:
-# 									baseList = [(x,x-1,x-2) for x in range(genebase1,geneendbase-1,-3)]
-# 								else:
-# 									baseList = [(x,x+1,x+2) for x in range(genebase1,geneendbase+1, 3)]
-
-# 				##### we now have the basic stuff done as well as a list of bases (baseList)
-# 				##### all that is left is to extract the amino acid / base (if specified)
-# 				##### N.B. these may be on the - strand but that is OK. Other functions can complement them easily
-# 				if ttype not in ['aagene','dnagene']:
-# 					tabAlleles = [tuple(str(fields[6]).upper().split(',')) ,tuple(str(fields[7]).upper().split(','))]
-# 					check_if_legit(ttype,tabAlleles,line)
-
-# 				##### we now create the object(s)
-# 				## create an Allele object for *every* line parsed *unless* we are analysing the entire gene
-# 				if ttype in ['dna','aa']:
-# 					try:
-# 						newObj = Variation(ttype,genename,chrom,baseList,rev,name,drug,alleles=tabAlleles,pos=posInGene)
-# 					except AssertionError:
-# 						raise ParseError("object creation failed for allele:",line)
-# 					else:
-# 						listOfAlleleObjs.append(newObj)
-
-# 				## create a Gene object if this gene has *not* been seen before *AND* we are analysing the entire gene...
-# 				elif ttype in ['dnagene','aagene'] and genename not in seenGeneNames:
-# 					try:
-# 						newObj = Variation(ttype,genename,chrom,baseList,rev,name,drug)
-# 					except AssertionError:
-# 						raise ParseError("object creation failed for gene:",line)
-# 					else:
-# 						listOfGeneObjs.append(newObj)
-# 						seenGeneNames.append(genename) ## won't get another Gene object
-
-# 			except ParseError as e:
-# 				print "[tabfile-parsing-error] {} on line {}".format(e.args[0],e.args[1])
-
-# 	return listOfAlleleObjs,listOfGeneObjs
+	return listOfAlleleObjs,listOfGeneObjs
 
 #### GENERAL DNA / AA CLASS WITH USEFUL METHODS
 class Sanger(object):
@@ -223,7 +124,7 @@ class Sanger(object):
 class Variation(object):
 	"""to write"""
 
-	def __init__(self,ttype,name,chrm,bl,rev):
+	def __init__(self,ttype,name,chrm,bl,rev,alleles):
 		self.ttype    = ttype
 		assert(ttype in ['dna','aa','aagene','dnagene','genome'])
 		self.genename = name
@@ -232,10 +133,14 @@ class Variation(object):
 		self.rev      = rev
 		self.name     = name
 		# self.drug     = drug
-		# if alleles:
-		# 	self.WT  = alleles[0]
-		# 	self.ALT = alleles[1]
-		# 	self.posInGene= pos
+		if alleles:
+			try:
+				self.WT  = alleles[0]
+				self.ALT = alleles[1]
+				self.dnaseq = alleles[0]
+			except:
+				raise Exception("WT/ALT assignment problem")
+			# self.posInGene= pos
 		self.resistanceAlleles={}
 
 	def set_pileup_counts(self,bamobj):
@@ -302,7 +207,7 @@ class Variation(object):
 
 
 			# now we iterate through the pileup at this base!
-			if self.ttype in ['dnagene','genome']:
+			if self.ttype in ['dna','dnagene','genome']:
 				for base,depth in item.items():
 					depthfrac = float(depth) / data['depth']
 					if base == refBase:
@@ -479,15 +384,21 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		def pass_filter(pileupread,qposns):
 			### fail if optical/PCR duplicate
 			if pileupread.alignment.is_duplicate:
-				# print "\tduplicate"
+				print "\tduplicate"
 				return False
 			### check mapping quality
 			if int(pileupread.alignment.mapq)<minMapQual:
-				# print "\tquality"
+				print "\tquality"
+				return False
+			### check paired
+			# pdb.set_trace()
+			if not pileupread.alignment.is_proper_pair:
+				print "\tnot proper pair"
 				return False
 			### check base call quality
 			for qpos in qposns:
 				if ord(pileupread.alignment.qual[qpos])<minBaseQual:
+					print "\tmin base qual fail"
 					return False ### changed 18may2015
 			return True
 
@@ -525,7 +436,7 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 		for idx,bases_here,singleton,base1 in bases_generator:
 
 			if not idx%10000:
-				print "Pileup of position {}".format(idx)
+				print "Pileup of position {} ({})".format(idx,bases_here[0])
 				sys.stdout.flush()
 
 
@@ -548,10 +459,15 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 						tmp = {}
 					# coverage = pileupcolumn.n
 					for pileupread in pileupcolumn.pileups:
+						if len(pileupread.alignment.cigar)>1:
+							print "INDEL/soft clipped"
+							continue
 						### we could be trying to find a single base or a codon
 						if singleton:
 							try:
 								sambase = pileupread.alignment.query[pileupread.qpos].upper()
+								print pileupread.alignment.pos
+								print pileupread.qpos
 							except IndexError:
 								continue ## cuased by reads returned not spanning base. soft clipping?
 							if pass_filter(pileupread,[pileupread.qpos]) and sambase in DNA:
@@ -577,6 +493,7 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 								tmp[tripletstr][strand] += 1
 
 					### we've now finished analysing a particular column in the pileup, time to save the results
+					print tmp
 					if singleton:
 						ret[idx]={k: v[0]+v[1] for k, v in tmp.iteritems() if v[0]>minStrandDepth and v[1]>minStrandDepth} ## filters out bases with no reads or strand read depth below cutoff
 					else: ## TRIPLET ?? CODON
@@ -585,6 +502,7 @@ class BAM(object): ## DOES THE PILEUPS FOR A CODON OR A BASE
 					break
 
 		# print "return time. ret: {}".format(ret)
+		print(ret)
 		return ret
 
 ## CALL RSCRIPT (given a call array)
@@ -635,16 +553,18 @@ if __name__ == "__main__":
 
 	if options.genome:
 		genome_segments = set_up_genome_analysis(records)
-
-	alleles,genes=[],[]
-	# alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
-
+		alleles,genes=[],[]
+	elif options.tabfile:
+		genome_segments = []
+		alleles,genes = parse_tabfile(options.tabfile,sanger) ## returns lists of Variation Objects
+	else:
+		print "No tabfile or --genome. Fatal."
+		sys.exit(2)
 
 
 	# associate alleles with genes chosen for analysis (if there are any...)
 	for gene in genes: gene.associate_alleles(alleles)
 
-	# pdb.set_trace()
 
 	## USE REFERNCE SEQ TO CHECK CORRECTNESS
 	with open(options.fasta, "rU") as fh:
@@ -660,7 +580,9 @@ if __name__ == "__main__":
 	# if genes:   writeRgenes   = open_rwriter(options.prefix+".genes.tab")
 	# if alleles: writeRalleles = open_rwriter(options.prefix+".alleles.tab")
 
-	outFH = gzip.open(options.prefix+".genes.tab.gz",'w')
+	# outFHgenome = gzip.open(options.prefix+".genes.tab.gz",'w')
+	outFHalleles = open(options.prefix+".genes.tab",'w')
+
 
 	## parse the BAM file
 	bam = BAM(infiles['bam'])
@@ -677,7 +599,7 @@ if __name__ == "__main__":
 		print "[progress-update] checking allele {} in gene {}".format(allele.name,allele.genename)
 		sys.stdout.flush()
 		allele.set_pileup_counts(bam) ## sets allele.pileup and maybe allele.aapileup
-		allele.interpret(writeRalleles) ## does not store data, passes it to writeRalleles
+		allele.interpret(outFHalleles) ## does not store data, passes it to writeRalleles
 
 	for gene in genes:
 		# if gene.name != "tsf": continue
@@ -688,7 +610,10 @@ if __name__ == "__main__":
 
 	# if genes:   writeRgenes(close=1)
 	# if alleles: writeRalleles(close=1)
-	outFH.close()
+	# outFHgenome.close()
+	outFHalleles.close()
+
+
 	# ## CALL R ####
 	# if options.plot:
 	# 	if alleles:

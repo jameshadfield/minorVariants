@@ -1,10 +1,12 @@
 #geneName	chromosome	location	amino-acid	baseInGene	baseInGenome	WT	ALT		name				drug
+#gene1		chr1		100..110	-			-			-				-	-		RNAgene1			-
+#gene2		chr1		7..54 		-			-			-				-	-		smallgene			-
+#gene3		chr1		c(1..60)	-			-			-				-	-		smallrevgene		-
+#allele1		chr1		1..100 		-			60			-				T	A		T60					-
+#allele2		chr1		1..100 		20			-			-				A	X		Ala20				-
+#allele3		chr1		c(100..120)	-			12			-				C	T		G109_minus			-
+#allele4		chr1		c(120..100)	5			-			-				C	X		Cys5_minus			-
 
 
-gene1		chr1		100..110	-			-			-				-	-		RNAgene1			-
-gene2		chr1		7..54 		-			-			-				-	-		smallgene			-
-gene3		chr1		c(1..60)	-			-			-				-	-		smallrevgene		-
-allele1		chr1		1..100 		-			60			-				T	A		T60					-
-allele2		chr1		1..100 		20			-			-				A	X		Ala20				-
-allele3		chr1		c(100..120)	-			12			-				C	T		G109_minus			-
-allele4		chr1		c(120..100)	5			-			-				C	X		Cys5_minus			-
+#type	chr		location	name	WT	PRI
+dnagene	chr1	100..110	gene1
